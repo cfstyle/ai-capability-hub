@@ -22,6 +22,7 @@ dist/
 *.sqlite
 *.sqlite3
 *.log
+*.pid
 logs/
 
 # IDE & OS

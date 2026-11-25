@@ -10,6 +10,9 @@ services:
     volumes:
       - hub-data:/app/data
       - hub-logs:/app/logs
+      - ./services:/app/services
+      - ./data/shared-packages:/shared-packages:ro
+      - ./data/wheels:/wheels:ro
     environment:
       - HUB_ENV=${HUB_ENV:-development}
       - HUB_LOG_LEVEL=${HUB_LOG_LEVEL:-INFO}
@@ -33,9 +36,16 @@ services:
     restart: unless-stopped
 
   ticm-mcp:
-    build:
-      context: ./services/ticm-mcp
-      dockerfile: Dockerfile
+    image: mcp-runner:latest
+    working_dir: /app
+    volumes:
+      - ./services/ticm-mcp:/app:ro
+      - ./data/shared-packages:/shared-packages:ro
+      - ./data/wheels:/wheels:ro
+    environment:
+      - TICM_HOST=0.0.0.0
+      - PYTHONDONTWRITEBYTECODE=1
+    command: ["python", "server.py"]
     expose:
       - "8081"
     healthcheck:
