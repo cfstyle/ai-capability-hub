@@ -55,3 +55,37 @@
    - **底座预设**：基础镜像预装覆盖 90% 需求。
    - **全局共享依赖池**：引入跨服务通用新库时，在内网机器执行 `pip install --target=/data/shared-packages <wheel>`，注入全局 `PYTHONPATH`，所有容器免重启即刻可用。
    - **单服务独立自装**：服务专属依赖通过宿主机 `/data/wheels` 目录挂载，容器启动脚本检测 `requirements.txt` 自动静默安装。
+
+---
+
+## 3. 镜像构建、VPS 打包与内网交付规范
+
+1. **统一构建顺序（必须先建底座）**：
+   - `hub-core/Dockerfile` 以 `mcp-runner:latest` 为基础镜像（`FROM mcp-runner:latest`），`ticm-mcp` 等 Python MCP 服务在 `docker-compose.yml` 中直接复用 `image: mcp-runner:latest` + 卷挂载 `./services/<name>:/app:ro`。
+   - **禁止直接跳过底座单独执行 `docker-compose build`**，统一使用 `./scripts/build.sh`（自动先构建 `mcp-runner:latest`，再执行 `docker-compose build`）：
+     ```bash
+     # 默认构建
+     ./scripts/build.sh
+
+     # 国内环境 / 测试打包 VPS（腾讯云）加速构建
+     APT_MIRROR=http://mirrors.tencent.com \
+     PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple \
+     NPM_REGISTRY=https://registry.npmmirror.com \
+     ./scripts/build.sh
+     ```
+
+2. **目录挂载约定（`docker-compose.yml`）**：
+   - `hub-core` 与各 Python MCP 容器统一挂载 `./data/shared-packages:/shared-packages:ro` 与 `./data/wheels:/wheels:ro`。
+   - `hub-core` 挂载 `./services:/app/services`，确保通过管理端 ZIP 上传动态发布的插件在容器重建后不丢失，且子进程直接继承 `mcp-runner` 的完整依赖与 `PYTHONPATH=/shared-packages`。
+
+3. **离线导出与内网部署**：
+   - 在测试/打包机导出离线镜像包（`mcp-runner:latest` 与 `hub-core` 的共享底层会在 `tar` 中自动去重）：
+     ```bash
+     docker save \
+       mcp-runner:latest \
+       ai-capability-hub-hub-core:latest \
+       ai-capability-hub-message-mcp:latest \
+       ai-capability-hub-hub-admin:latest \
+       | gzip > ai-capability-hub-images.tar.gz
+     ```
+   - 拷贝到内网服务器后执行 `docker load -i ai-capability-hub-images.tar.gz` 并 `docker-compose up -d`。后续仅更新 Python 业务 MCP 代码时，只需同步宿主机 `./services/` 目录即可，无需重打或重新导出镜像。

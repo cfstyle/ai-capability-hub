@@ -84,20 +84,37 @@ pytest hub-core/tests
 
 ### 方式二：Docker Compose 容器部署（生产发布/隔离验证）
 
-后续发布或打包至银行隔离内网环境时使用：
+所有 Python 服务（`hub-core` 及 `services/` 下业务 MCP）统一共享 `mcp-runner:latest` 底座镜像，构建时请使用 `scripts/build.sh`：
 
 ```bash
 # 1. 复制环境变量配置
 cp .env.example .env
 
-# 2. 启动所有服务
+# 2. 构建共享 Python 底座及各服务镜像
+./scripts/build.sh
+
+# （国内网络可使用镜像源参数加速构建）
+# APT_MIRROR=http://mirrors.tencent.com \
+# PIP_INDEX_URL=https://mirrors.cloud.tencent.com/pypi/simple \
+# NPM_REGISTRY=https://registry.npmmirror.com \
+# ./scripts/build.sh
+
+# 3. 启动所有服务
 docker-compose up -d
 
-# 3. 检查服务状态
+# 4. 检查服务状态与健康检查
 docker-compose ps
-
-# 4. 验证健康检查
 curl http://localhost:8080/healthz
+```
+
+如需打包拷贝至隔离内网环境部署：
+```bash
+docker save \
+  mcp-runner:latest \
+  ai-capability-hub-hub-core:latest \
+  ai-capability-hub-message-mcp:latest \
+  ai-capability-hub-hub-admin:latest \
+  | gzip > ai-capability-hub-images.tar.gz
 ```
 
 ## 项目结构
