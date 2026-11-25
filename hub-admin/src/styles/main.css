@@ -1,0 +1,168 @@
+@import './m3-tokens.css';
+@import './legacy-bridge.css';
+
+/* Reset & Box Sizing */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scrollbar-gutter: stable;
+}
+
+html,
+body {
+  width: 100%;
+  min-height: 100vh;
+  background-color: var(--md-sys-color-surface);
+  color: var(--md-sys-color-on-surface);
+  font-family: 'Plus Jakarta Sans', 'OPPO Sans', 'HarmonyOS Sans SC', 'PingFang SC', 'Noto Sans SC', -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  transition: background-color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard),
+              color var(--md-sys-motion-duration-short4) var(--md-sys-motion-easing-standard);
+  overflow-x: hidden;
+}
+
+#app {
+  width: 100%;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font-family: inherit;
+  border: none;
+  background: none;
+  cursor: pointer;
+  outline: none;
+}
+
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--md-sys-color-primary);
+  outline-offset: 2px;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--md-sys-color-outline-variant);
+  border-radius: var(--md-sys-shape-corner-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--md-sys-color-outline);
+}
+
+/* ==========================================================================
+   5 级双端语义模数音阶 (Modular Type Scale Utilities)
+   ========================================================================== */
+
+/* Tier 1: 视觉焦点（KPI 大数字、核心展示） */
+.type-display {
+  font-size: var(--md-type-display-size, 26px);
+  line-height: var(--md-type-display-lh, 32px);
+  font-weight: var(--md-type-display-weight, 700);
+  letter-spacing: var(--md-type-display-tracking, -0.02em);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Tier 2: 页面/区块标题 */
+.type-title-lg {
+  font-size: var(--md-type-title-lg-size, 20px);
+  line-height: var(--md-type-title-lg-lh, 28px);
+  font-weight: var(--md-type-title-lg-weight, 700);
+  letter-spacing: var(--md-type-title-lg-tracking, -0.01em);
+}
+
+/* Tier 3: 卡片内子标题/分组头 */
+.type-title-md {
+  font-size: var(--md-type-title-md-size, 16px);
+  line-height: var(--md-type-title-md-lh, 24px);
+  font-weight: var(--md-type-title-md-weight, 600);
+  letter-spacing: var(--md-type-title-md-tracking, 0);
+}
+
+/* Tier 4: 正文主要信息 */
+.type-body-md {
+  font-size: var(--md-type-body-md-size, 14px);
+  line-height: var(--md-type-body-md-lh, 20px);
+  font-weight: var(--md-type-body-md-weight, 400);
+  letter-spacing: var(--md-type-body-md-tracking, 0.01em);
+}
+
+/* Tier 5: 辅助说明、元数据、微标注 */
+.type-body-sm {
+  font-size: var(--md-type-body-sm-size, 12px);
+  line-height: var(--md-type-body-sm-lh, 16px);
+  font-weight: var(--md-type-body-sm-weight, 400);
+  letter-spacing: var(--md-type-body-sm-tracking, 0.02em);
+}
+
+/* 状态交互层 */
+.md-state-layer {
+  position: relative;
+  overflow: hidden;
+}
+
+.md-state-layer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-color: currentColor;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--md-sys-motion-duration-short2) var(--md-sys-motion-easing-standard);
+  border-radius: inherit;
+}
+
+.md-state-layer:hover::after {
+  opacity: var(--md-sys-state-hover-opacity, 0.08);
+}
+
+.md-state-layer:active::after {
+  opacity: var(--md-sys-state-pressed-opacity, 0.12);
+}
+
+.md-state-layer:focus-visible::after {
+  opacity: var(--md-sys-state-focus-opacity, 0.12);
+}
+
+/* Code & Mono font */
+.mono-code {
+  font-family: 'JetBrains Mono', 'Fira Code', Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  background-color: var(--md-sys-color-surface-container-highest);
+  color: var(--md-sys-color-primary);
+  padding: 2px 6px;
+  border-radius: var(--md-sys-shape-corner-small, 6px);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  display: inline-block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  vertical-align: middle;
+}

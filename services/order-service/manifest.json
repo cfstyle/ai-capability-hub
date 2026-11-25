@@ -1,0 +1,20 @@
+{
+  "manifest_version": "1.0.0",
+  "service_id": "order-service",
+  "name": "电商订单服务 MCP",
+  "version": "1.0.0",
+  "description": "提供订单查询、履约状态追踪及明细核对能力",
+  "author": "first-time-developer",
+  "entrypoint": "server.py",
+  "protocol": "streamable-http",
+  "port": 8000,
+  "healthz_path": "/healthz",
+  "mcp_path": "/mcp",
+  "tools": [
+    {
+      "name": "query_order",
+      "description": "根据订单编号查询订单状态、支付金额与商品明细",
+      "risk_level": "L0"
+    }
+  ]
+}

@@ -1,0 +1,83 @@
+version: "3.9"
+
+services:
+  hub-core:
+    build:
+      context: .
+      dockerfile: hub-core/Dockerfile
+    ports:
+      - "${HUB_PORT:-8080}:8080"
+    volumes:
+      - hub-data:/app/data
+      - hub-logs:/app/logs
+    environment:
+      - HUB_ENV=${HUB_ENV:-development}
+      - HUB_LOG_LEVEL=${HUB_LOG_LEVEL:-INFO}
+      - HUB_ADMIN_API_KEY=${HUB_ADMIN_API_KEY:-dev-admin-key}
+      - HUB_CREDENTIAL_ENCRYPTION_KEY=${HUB_CREDENTIAL_ENCRYPTION_KEY:-}
+      - TICM_ENDPOINT_URL=http://ticm-mcp:8081/mcp
+      - SERVICES_DIR=/app/services
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      ticm-mcp:
+        condition: service_healthy
+      message-mcp:
+        condition: service_healthy
+    networks:
+      - hub-internal
+    restart: unless-stopped
+
+  ticm-mcp:
+    build:
+      context: ./services/ticm-mcp
+      dockerfile: Dockerfile
+    expose:
+      - "8081"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8081/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - hub-internal
+    restart: unless-stopped
+
+  message-mcp:
+    build:
+      context: ./services/message-mcp
+      dockerfile: Dockerfile
+    expose:
+      - "8082"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8082/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - hub-internal
+    restart: unless-stopped
+
+  hub-admin:
+    build:
+      context: ./hub-admin
+      dockerfile: Dockerfile
+    ports:
+      - "${ADMIN_PORT:-3000}:80"
+    depends_on:
+      - hub-core
+    networks:
+      - hub-internal
+    restart: unless-stopped
+
+volumes:
+  hub-data:
+  hub-logs:
+
+networks:
+  hub-internal:
+    driver: bridge

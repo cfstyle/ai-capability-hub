@@ -1,0 +1,15 @@
+# ==============================================================================
+# 业务专属额外依赖配置
+# ==============================================================================
+# 注意：mcp-runner 共享底座已预装以下常见库，无需重复声明：
+# - fastmcp, mcp, fastapi, starlette, uvicorn, sse-starlette
+# - httpx, requests, aiohttp, aiofiles
+# - pydantic, pydantic-settings, pyyaml, python-dotenv, xmltodict, simplejson, beautifulsoup4
+# - sqlalchemy, pymysql, aiomysql, asyncpg, redis, sqlparse, boto3
+# - openpyxl, xlsxwriter, python-docx, xlrd, xlwt, reportlab
+# - tenacity, cachetools, cryptography, pyjwt, rich
+#
+# 仅当你的插件需要底座之外的特殊库时，才在此处取消注释或追加写入：
+# 例如：
+# pymongo>=4.6.0
+# elasticsearch>=8.12.0

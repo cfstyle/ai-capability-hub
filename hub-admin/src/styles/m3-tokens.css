@@ -1,0 +1,356 @@
+/**
+ * Material Design 3 Design Tokens
+ * Conforming to standard M3 specification with Dynamic HCT Color Support
+ */
+
+:root {
+  /* ==========================================================================
+     M3 Color Roles - Light Mode (Baseline fallback, overwritten dynamically by HCT)
+     Tone 90 balance specification for containers
+     ========================================================================== */
+  
+  /* Primary */
+  --md-sys-color-primary: #6750a4;
+  --md-sys-color-on-primary: #ffffff;
+  --md-sys-color-primary-container: #eaddff;
+  --md-sys-color-on-primary-container: #21005d;
+  --md-sys-color-inverse-primary: #d0bcff;
+
+  /* Secondary */
+  --md-sys-color-secondary: #625b71;
+  --md-sys-color-on-secondary: #ffffff;
+  --md-sys-color-secondary-container: #e8def8;
+  --md-sys-color-on-secondary-container: #1d192b;
+
+  /* Tertiary (Tone 90 平衡柔光海青) */
+  --md-sys-color-tertiary: #006874;
+  --md-sys-color-on-tertiary: #ffffff;
+  --md-sys-color-tertiary-container: #cef5f2;
+  --md-sys-color-on-tertiary-container: #002023;
+
+  /* Error */
+  --md-sys-color-error: #b3261e;
+  --md-sys-color-on-error: #ffffff;
+  --md-sys-color-error-container: #f9dedc;
+  --md-sys-color-on-error-container: #410e0b;
+
+  /* Surface & Background */
+  --md-sys-color-surface: #fef7ff;
+  --md-sys-color-on-surface: #1d1b20;
+  --md-sys-color-on-surface-variant: #49454f;
+  --md-sys-color-surface-dim: #ded8e1;
+  --md-sys-color-surface-bright: #fef7ff;
+
+  /* Surface Container Levels (Baseline) */
+  --md-sys-color-surface-container-lowest: #ffffff;
+  --md-sys-color-surface-container-low: #f7f2fa;
+  --md-sys-color-surface-container: #f3edf7;
+  --md-sys-color-surface-container-high: #ece6f0;
+  --md-sys-color-surface-container-highest: #e6e0e9;
+
+  /* Inverse */
+  --md-sys-color-inverse-surface: #313033;
+  --md-sys-color-inverse-on-surface: #f4eff4;
+
+  /* Outline */
+  --md-sys-color-outline: #79747e;
+  --md-sys-color-outline-variant: #cac4d0;
+
+  /* Shadow & Scrim */
+  --md-sys-color-shadow: #000000;
+  --md-sys-color-scrim: #000000;
+
+  /* ==========================================================================
+     M3 Shape Tokens (Border Radius)
+     ========================================================================== */
+  --md-sys-shape-corner-none: 0px;
+  --md-sys-shape-corner-extra-small: 4px;
+  --md-sys-shape-corner-small: 8px;
+  --md-sys-shape-corner-medium: 16px;
+  --md-sys-shape-corner-large: 24px;
+  --md-sys-shape-corner-extra-large: 28px;
+  --md-sys-shape-corner-full: 9999px;
+
+  /* Context Dynamic Shape Mappings */
+  --md-radius-card: var(--md-sys-shape-corner-large);
+  --md-radius-button: var(--md-sys-shape-corner-full);
+  --md-radius-input: var(--md-sys-shape-corner-medium);
+
+  /* ==========================================================================
+     M3 Elevation Shadows (含 M3 Level 1 / Level 2 极克制微阴影)
+     ========================================================================== */
+  --md-elevation-1: 0 1px 2px rgba(0, 0, 0, 0.05), 0 1px 3px 1px rgba(0, 0, 0, 0.04);
+  --md-elevation-2: 0 2px 6px rgba(0, 0, 0, 0.06), 0 1px 4px rgba(0, 0, 0, 0.05);
+
+  --md-sys-elevation-level0: none;
+  --md-sys-elevation-level1: var(--md-elevation-1);
+  --md-sys-elevation-level2: var(--md-elevation-2);
+  --md-sys-elevation-level3: 0px 4px 8px 3px rgba(0, 0, 0, 0.12), 0px 1px 3px 0px rgba(0, 0, 0, 0.2);
+  --md-sys-elevation-level4: 0px 6px 10px 4px rgba(0, 0, 0, 0.12), 0px 2px 3px 0px rgba(0, 0, 0, 0.2);
+  --md-sys-elevation-level5: 0px 8px 12px 6px rgba(0, 0, 0, 0.12), 0px 4px 4px 0px rgba(0, 0, 0, 0.2);
+
+  /* ==========================================================================
+     M3 Motion & Easing Tokens
+     ========================================================================== */
+  --md-easing-emphasized: cubic-bezier(0.2, 0, 0, 1);
+  --md-sys-motion-easing-standard: cubic-bezier(0.2, 0.0, 0.0, 1.0);
+  --md-sys-motion-easing-emphasized: var(--md-easing-emphasized);
+  --md-sys-motion-easing-emphasized-decelerate: cubic-bezier(0.05, 0.7, 0.1, 1.0);
+  --md-sys-motion-easing-emphasized-accelerate: cubic-bezier(0.3, 0.0, 0.8, 0.15);
+
+  --md-sys-motion-duration-short1: 50ms;
+  --md-sys-motion-duration-short2: 100ms;
+  --md-sys-motion-duration-short3: 150ms;
+  --md-sys-motion-duration-short4: 200ms;
+  --md-sys-motion-duration-medium1: 250ms;
+  --md-sys-motion-duration-medium2: 300ms;
+  --md-sys-motion-duration-medium3: 350ms;
+  --md-sys-motion-duration-medium4: 400ms;
+  --md-sys-motion-duration-long1: 450ms;
+  --md-sys-motion-duration-long2: 500ms;
+
+  /* State Opacity */
+  --md-sys-state-hover-opacity: 0.08;
+  --md-sys-state-focus-opacity: 0.12;
+  --md-sys-state-pressed-opacity: 0.12;
+  --md-sys-state-dragged-opacity: 0.16;
+
+  /* Density & Layout spacing defaults */
+  --md-card-padding: 20px;
+  --md-grid-gap: 20px;
+  --md-space-section: 36px;
+
+  /* ==========================================================================
+     M3 Global Z-Index Scale (统一全站弹层层级阶梯)
+     ========================================================================== */
+  --z-header: 30;
+  --z-backdrop: 40;
+  --z-modal: 50;
+  --z-popover: 60;
+  --z-toast: 70;
+
+  /* ==========================================================================
+     5 级双端语义模数音阶 (Modular Type Scale Tokens)
+     基准回退 (Baseline fallback: Default to Admin Context)
+     ========================================================================== */
+  /* Tier 1: 视觉焦点 (Display) - Admin: 26px / Portal: 42px */
+  --md-type-display-size: 26px;
+  --md-type-display-lh: 32px;
+  --md-type-display-weight: 700;
+  --md-type-display-tracking: -0.02em;
+
+  /* Tier 2: 页面/区块标题 (Title Large) - Admin: 20px / Portal: 28px */
+  --md-type-title-lg-size: 20px;
+  --md-type-title-lg-lh: 28px;
+  --md-type-title-lg-weight: 700;
+  --md-type-title-lg-tracking: -0.015em;
+
+  /* Tier 3: 卡片/模块标题 (Title Medium) - Admin: 16px / Portal: 20px */
+  --md-type-title-md-size: 16px;
+  --md-type-title-md-lh: 24px;
+  --md-type-title-md-weight: 600;
+  --md-type-title-md-tracking: normal;
+
+  /* Tier 4: 主力正文与列表主行 (Body) - Admin: 14px / Portal: 15px */
+  --md-type-body-size: 14px;
+  --md-type-body-lh: 22px;
+  --md-type-body-weight: 400;
+  --md-type-body-tracking: normal;
+
+  /* Tier 5: 辅助元数据与徽章 (Meta) - Admin: 12px / Portal: 13px (全站严禁小于 12px) */
+  --md-type-meta-size: 12px;
+  --md-type-meta-lh: 18px;
+  --md-type-meta-weight: 500;
+  --md-type-meta-tracking: normal;
+}
+
+/* ==========================================================================
+   M3 Color Roles - Dark Mode (Fallback baseline)
+   ========================================================================== */
+[data-theme="dark"] {
+  /* Primary */
+  --md-sys-color-primary: #d0bcff;
+  --md-sys-color-on-primary: #381e72;
+  --md-sys-color-primary-container: #4f378b;
+  --md-sys-color-on-primary-container: #eaddff;
+  --md-sys-color-inverse-primary: #6750a4;
+
+  /* Secondary */
+  --md-sys-color-secondary: #ccc2dc;
+  --md-sys-color-on-secondary: #332d41;
+  --md-sys-color-secondary-container: #4a4458;
+  --md-sys-color-on-secondary-container: #e8def8;
+
+  /* Tertiary */
+  --md-sys-color-tertiary: #4ddad7;
+  --md-sys-color-on-tertiary: #00373a;
+  --md-sys-color-tertiary-container: #004f55;
+  --md-sys-color-on-tertiary-container: #cef5f2;
+
+  /* Error */
+  --md-sys-color-error: #f2b8b5;
+  --md-sys-color-on-error: #601410;
+  --md-sys-color-error-container: #8c1d18;
+  --md-sys-color-on-error-container: #f9dedc;
+
+  /* Surface & Background */
+  --md-sys-color-surface: #141218;
+  --md-sys-color-on-surface: #e6e0e9;
+  --md-sys-color-on-surface-variant: #cac4d0;
+  --md-sys-color-surface-dim: #141218;
+  --md-sys-color-surface-bright: #3b383e;
+
+  /* Surface Container Levels (Dark Mode) */
+  --md-sys-color-surface-container-lowest: #0f0d13;
+  --md-sys-color-surface-container-low: #1d1b20;
+  --md-sys-color-surface-container: #211f26;
+  --md-sys-color-surface-container-high: #2b2930;
+  --md-sys-color-surface-container-highest: #36343b;
+
+  /* Inverse */
+  --md-sys-color-inverse-surface: #e6e0e9;
+  --md-sys-color-inverse-on-surface: #313033;
+
+  /* Outline */
+  --md-sys-color-outline: #938f99;
+  --md-sys-color-outline-variant: #49454f;
+
+  /* Shadow & Scrim */
+  --md-sys-color-shadow: #000000;
+  --md-sys-color-scrim: #000000;
+
+  /* Dark mode 克制阴影 */
+  --md-elevation-1: 0 1px 3px rgba(0, 0, 0, 0.35), 0 1px 2px rgba(0, 0, 0, 0.25);
+  --md-elevation-2: 0 3px 8px rgba(0, 0, 0, 0.45), 0 2px 4px rgba(0, 0, 0, 0.35);
+
+  --md-sys-elevation-level1: var(--md-elevation-1);
+  --md-sys-elevation-level2: var(--md-elevation-2);
+}
+
+/* ==========================================================================
+   前后台双场景预设 (Context Presets) 动态变量映射
+   ========================================================================== */
+
+/* 1. 官网展示模式 (Portal Context) */
+[data-context="portal"] {
+  --md-radius-card: 24px;
+  --md-radius-button: 9999px;
+  --md-radius-input: 16px;
+  --md-space-section: 48px;
+  --md-grid-gap: 24px;
+  --md-card-padding: 28px;
+
+  /* 官网 5 级模数音阶 (总跨度收敛至 3.23x: 42px / 13px) */
+  --md-type-display-size: 42px;
+  --md-type-display-lh: 50px;
+  --md-type-display-weight: 700;
+  --md-type-display-tracking: -0.02em;
+
+  --md-type-title-lg-size: 28px;
+  --md-type-title-lg-lh: 36px;
+  --md-type-title-lg-weight: 700;
+  --md-type-title-lg-tracking: -0.015em;
+
+  --md-type-title-md-size: 20px;
+  --md-type-title-md-lh: 28px;
+  --md-type-title-md-weight: 600;
+  --md-type-title-md-tracking: normal;
+
+  --md-type-body-size: 15px;
+  --md-type-body-lh: 24px;
+  --md-type-body-weight: 400;
+  --md-type-body-tracking: normal;
+
+  --md-type-meta-size: 13px;
+  --md-type-meta-lh: 18px;
+  --md-type-meta-weight: 500;
+  --md-type-meta-tracking: normal;
+}
+
+/* 2. 后台管理模式 (Admin Context) */
+[data-context="admin"] {
+  --md-radius-card: 16px;
+  --md-radius-button: 9999px;
+  --md-radius-input: 8px;
+  --md-space-section: 24px;
+  --md-grid-gap: 16px;
+  --md-card-padding: 16px;
+
+  /* 后台 5 级模数音阶 (总跨度收敛至 2.16x: 26px / 12px) */
+  --md-type-display-size: 26px;
+  --md-type-display-lh: 32px;
+  --md-type-display-weight: 700;
+  --md-type-display-tracking: -0.02em;
+
+  --md-type-title-lg-size: 20px;
+  --md-type-title-lg-lh: 28px;
+  --md-type-title-lg-weight: 700;
+  --md-type-title-lg-tracking: -0.015em;
+
+  --md-type-title-md-size: 16px;
+  --md-type-title-md-lh: 24px;
+  --md-type-title-md-weight: 600;
+  --md-type-title-md-tracking: normal;
+
+  --md-type-body-size: 14px;
+  --md-type-body-lh: 22px;
+  --md-type-body-weight: 400;
+  --md-type-body-tracking: normal;
+
+  --md-type-meta-size: 12px;
+  --md-type-meta-lh: 18px;
+  --md-type-meta-weight: 500;
+  --md-type-meta-tracking: normal;
+}
+
+/* ==========================================================================
+   密度预设 (Density Modes)
+   ========================================================================== */
+[data-density="compact"] {
+  --md-card-padding: 14px;
+  --md-grid-gap: 12px;
+  --md-space-section: 20px;
+}
+
+[data-density="comfortable"] {
+  --md-card-padding: 20px;
+  --md-grid-gap: 18px;
+}
+
+[data-context="portal"][data-density="comfortable"] {
+  --md-card-padding: 28px;
+  --md-grid-gap: 24px;
+}
+
+/* ==========================================================================
+   Global M3 State Layer Helper Classes
+   ========================================================================== */
+.md-state-layer {
+  position: relative;
+  overflow: hidden;
+  isolation: isolate;
+}
+
+.md-state-layer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background-color: currentColor;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--md-sys-motion-duration-short2) var(--md-easing-emphasized);
+  z-index: 1;
+}
+
+.md-state-layer:hover::after {
+  opacity: var(--md-sys-state-hover-opacity);
+}
+
+.md-state-layer:focus-visible::after {
+  opacity: var(--md-sys-state-focus-opacity);
+}
+
+.md-state-layer:active::after {
+  opacity: var(--md-sys-state-pressed-opacity);
+}

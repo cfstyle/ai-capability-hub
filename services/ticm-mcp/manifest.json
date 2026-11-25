@@ -1,0 +1,54 @@
+{
+  "manifest_version": "1.0.0",
+  "service_id": "ticm",
+  "name": "TICM 债券资管系统",
+  "version": "1.0.0",
+  "description": "提供公开银行间交易日历、债券查询及个人隔离持仓查询能力",
+  "author": "AI Capability Hub Team",
+  "entrypoint": "server.py",
+  "protocol": "streamable-http",
+  "port": 8081,
+  "healthz_path": "/healthz",
+  "mcp_path": "/mcp",
+  "credential_schema": {
+    "enabled": true,
+    "auth_type": "username_password",
+    "instructions": "请填写您在 TICM 系统的专有业务用户名与密码（公开交易日历无需绑定）",
+    "fields": [
+      {
+        "field_name": "username",
+        "label": "TICM 用户名",
+        "field_type": "text",
+        "required": true,
+        "secret": false
+      },
+      {
+        "field_name": "password",
+        "label": "TICM 登录密码",
+        "field_type": "password",
+        "required": true,
+        "secret": true
+      }
+    ]
+  },
+  "tools": [
+    {
+      "name": "ticm__trading_calendar",
+      "description": "查询银行间债券市场交易日历（公开免凭据）",
+      "risk_level": "L0",
+      "requires_credentials": false
+    },
+    {
+      "name": "ticm__portfolio_summary",
+      "description": "查询个人债券持仓汇总（需个人业务凭据绑定）",
+      "risk_level": "L1",
+      "requires_credentials": true
+    },
+    {
+      "name": "ticm__bond_detail",
+      "description": "查询单只债券详情（公开免凭据）",
+      "risk_level": "L0",
+      "requires_credentials": false
+    }
+  ]
+}

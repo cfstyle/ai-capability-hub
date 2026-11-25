@@ -1,0 +1,14 @@
+{
+  "name": "message-mcp-server",
+  "version": "0.1.0",
+  "description": "Mock internal message MCP Server for AI Capability Hub",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": ">=1.0.0",
+    "express": "^4.21.0",
+    "zod": "^3.23.0"
+  }
+}

@@ -1,0 +1,10 @@
+version: "3.9"
+
+services:
+  hub-core:
+    volumes:
+      - ./hub-core/src:/app/src:ro
+    environment:
+      - HUB_ENV=development
+      - HUB_LOG_LEVEL=DEBUG
+    command: ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload", "--reload-dir", "/app/src"]

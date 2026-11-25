@@ -1,0 +1,25 @@
+{
+  "manifest_version": "1.0.0",
+  "service_id": "python-mcp-demo",
+  "name": "Python MCP 标准示例插件",
+  "version": "1.0.0",
+  "description": "AI Capability Hub 官方标准 Python MCP 插件示例，提供示范性的查询与执行工具",
+  "author": "AI Capability Hub Team",
+  "entrypoint": "server.py",
+  "protocol": "streamable-http",
+  "port": 8000,
+  "healthz_path": "/healthz",
+  "mcp_path": "/mcp",
+  "tools": [
+    {
+      "name": "get_demo_data",
+      "description": "查询示例数据明细，用于验证 MCP 工具查询通路",
+      "risk_level": "L0"
+    },
+    {
+      "name": "process_demo_task",
+      "description": "执行示例业务动作，演示带复杂参数校验与异常处理的写入操作",
+      "risk_level": "L1"
+    }
+  ]
+}
