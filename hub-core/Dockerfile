@@ -2,13 +2,19 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+ARG APT_MIRROR=""
+ARG PIP_INDEX_URL=""
+
 # Install curl for healthcheck
-RUN apt-get update && apt-get install -y --no-install-recommends curl \
+RUN if [ -n "$APT_MIRROR" ]; then \
+      sed -i "s|http://deb.debian.org|${APT_MIRROR}|g; s|http://security.debian.org|${APT_MIRROR}|g; s|https://deb.debian.org|${APT_MIRROR}|g; s|https://security.debian.org|${APT_MIRROR}|g" /etc/apt/sources.list /etc/apt/sources.list.d/*.sources 2>/dev/null || true; \
+    fi && \
+    apt-get update && apt-get install -y --no-install-recommends curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies first (layer caching)
 COPY hub-core/requirements.txt requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir ${PIP_INDEX_URL:+-i $PIP_INDEX_URL} -r requirements.txt
 
 # Copy application code
 COPY hub-core/src/ src/
