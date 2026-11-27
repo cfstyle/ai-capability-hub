@@ -113,7 +113,7 @@ class HubConfig(BaseSettings):
 
     model_config = {
         "env_prefix": "HUB_",
-        "env_file": ".env",
+        "env_file": (str(Path(__file__).resolve().parents[2] / ".env"), ".env"),
         "extra": "ignore",
     }
 

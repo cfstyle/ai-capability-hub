@@ -968,6 +968,42 @@ async def internal_restore_user(
     )
 
 
+@api_router.post(
+    "/internal/users/{emp_no}/ide-token",
+    summary="内部接口：为在职员工签发 ide-client 长效 MCP Token",
+)
+async def internal_issue_ide_token(
+    emp_no: str,
+    request: Request,
+    _: None = Depends(verify_internal_secret),
+) -> Dict[str, str]:
+    """仅供 RgOne 后端通过 X-Internal-Secret 换取员工 ide-client 长效 MCP Token"""
+    from src.governance.auth import create_access_token
+
+    clean_emp_no = emp_no.strip()
+    if not clean_emp_no or clean_emp_no.lower() == "guest":
+        raise HTTPException(status_code=400, detail="无效的员工工号")
+
+    store = get_store(request)
+    rec = await store.get_user_revocation(clean_emp_no)
+    if rec and not rec["is_active"]:
+        raise HTTPException(status_code=403, detail="员工账号已停用，禁止签发 MCP Token")
+
+    token = create_access_token(user_id=clean_emp_no, client_id="ide-client")
+    config = getattr(request.app.state, "config", None)
+    configured_url = getattr(config, "public_mcp_url", None) if config else None
+    if configured_url and str(configured_url).strip():
+        gateway_url = str(configured_url).strip()
+    else:
+        gateway_url = f"{str(request.base_url).rstrip('/')}/mcp"
+
+    return {
+        "user_id": clean_emp_no,
+        "token": token,
+        "gateway_url": gateway_url,
+    }
+
+
 @api_router.get(
     "/system/status",
     summary="系统运行状态",

@@ -88,7 +88,18 @@ async def list_portal_capabilities(
 ) -> List[PortalCapabilityCard]:
     """获取脱敏后的已发布能力卡片列表，支持分类筛选、关键字搜索与真实热度排序"""
     store = _get_store(request)
-    return await store.list_portal_capabilities(q=q, category=category, sort_by=sort_by)
+    ctx_user = get_current_user()
+    effective_uid = (
+        ctx_user.sub
+        if ctx_user and ctx_user.sub and ctx_user.sub.lower() != "guest"
+        else None
+    )
+    return await store.list_portal_capabilities(
+        q=q,
+        category=category,
+        sort_by=sort_by,
+        user_id=effective_uid,
+    )
 
 
 @portal_router.get(
@@ -372,6 +383,44 @@ async def update_portal_service_binding(
         credential_schema=svc.credential_schema,
     )
     return binding
+
+
+class ServiceToggleRequest(BaseModel):
+    """用户个人 MCP 装配开关请求"""
+
+    enabled: bool = Field(..., description="是否启用该服务")
+
+
+@portal_router.put(
+    "/my-mcps/{service_id}/toggle",
+    summary="开启或关闭个人对指定 MCP 服务的装配状态",
+)
+async def toggle_portal_service_enabled(
+    service_id: str,
+    body: ServiceToggleRequest,
+    request: Request,
+) -> dict:
+    """设置个人对该服务的装配开关（默认开启，关闭后从 tools/list 与 tools/call 隐藏并拦截）"""
+    store = _get_store(request)
+    ctx_user = get_current_user()
+    if not ctx_user or not ctx_user.sub or ctx_user.sub.lower() == "guest":
+        raise HTTPException(status_code=401, detail="请先登录企业工号")
+
+    svc = await store.get_service(service_id)
+    if not svc:
+        raise HTTPException(status_code=404, detail=f"Service '{service_id}' not found")
+
+    result = await store.set_user_service_enabled(
+        user_id=ctx_user.sub,
+        service_id=service_id,
+        enabled=body.enabled,
+    )
+    return {
+        "status": "ok",
+        "service_id": service_id,
+        "user_enabled": result["enabled"],
+        "updated_at": result["updated_at"],
+    }
 
 
 @portal_router.delete(

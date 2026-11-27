@@ -216,6 +216,7 @@ class UserMcpDetail(BaseModel):
     credential_version: int
     approved_tools: List[str]
     pending_tools: List[str]
+    user_enabled: bool = Field(default=True, description="当前用户个人是否开启该服务")
     updated_at: Optional[datetime] = None
 
 
@@ -376,6 +377,7 @@ class PortalCapabilityCard(BaseModel):
     auth_label: str = Field(default="Hub 统一认证", description="认证方式标签")
     auth_guide: str = Field(default="", description="统一认证引导说明")
     auth_entry_url: str = Field(default="", description="统一认证入口")
+    user_enabled: bool = Field(default=True, description="当前用户个人是否开启该服务")
     call_count: int = Field(default=0, description="累计真实调用次数")
     recent_calls_7d: int = Field(default=0, description="近7日调用次数")
     last_active_at: Optional[str] = Field(default=None, description="最后活跃时间")

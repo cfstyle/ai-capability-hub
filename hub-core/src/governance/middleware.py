@@ -130,6 +130,7 @@ class GovernanceMiddleware(Middleware):
 
         user_id = user.sub if user else "guest"
         granted_tool_ids = set(await self.store.get_user_granted_tool_ids(user_id))
+        disabled_service_ids = await self.store.get_user_disabled_service_ids(user_id)
 
         filtered_tools = []
         for tool_item in tools:
@@ -141,8 +142,10 @@ class GovernanceMiddleware(Middleware):
                     tool_meta = matches[0]
 
             if tool_meta:
-                # 检查所属服务是否正常启用
+                # 检查所属服务是否正常启用，以及当前用户个人装配开关是否关闭
                 if tool_meta.service_id not in active_service_ids:
+                    continue
+                if tool_meta.service_id in disabled_service_ids:
                     continue
 
                 if is_admin:
@@ -254,6 +257,22 @@ class GovernanceMiddleware(Middleware):
                 await _record_audit(err_text, dur)
                 raise RuntimeError(
                     f"Service '{service_id}' is currently {status_val}. Call to '{tool_name}' is blocked by Gateway."
+                )
+
+            # 3.5 个人装配开关判定（默认开启，仅显式关闭时拦截）
+            disabled_service_ids = await self.store.get_user_disabled_service_ids(user_id)
+            if service_id in disabled_service_ids:
+                dur = round((time.time() - start_time) * 1000, 2)
+                err_text = f"rejected: service '{service_id}' disabled in personal settings"
+                logger.warning(
+                    "Blocked call to personally disabled service '%s' (tool: %s, user: %s)",
+                    service_id,
+                    tool_name,
+                    user_id,
+                )
+                await _record_audit(err_text, dur)
+                raise PermissionError(
+                    f"Service '{service_id}' is disabled in your personal settings"
                 )
 
             # 3. 授权判定 (Admin 全通；L0 风险全员可用；非 L0 需精确匹配已获授权，杜绝模糊放行)

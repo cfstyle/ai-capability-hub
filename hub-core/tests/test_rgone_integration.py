@@ -212,3 +212,175 @@ def test_user_revocation_blocks_web_jwt_and_ide_mcp_token(integrated_client):
     r_new = client.get("/api/v1/portal/my-config", headers={"Authorization": f"Bearer {new_emp_jwt}"})
     assert r_new.status_code == 200
     assert r_new.json()["user_id"] == "06701099"
+
+
+def test_internal_issue_ide_token_and_revocation_block(integrated_client):
+    """内部 /ide-token 接口须经 X-Internal-Secret 鉴权，停用员工返回 403，在职员工由 Hub 独立密钥签发"""
+    client, _store, _rgone_secret, mcp_secret, internal_secret = integrated_client
+
+    r_bad = client.post(
+        "/api/v1/internal/users/06700956/ide-token",
+        headers={"X-Internal-Secret": "wrong-secret"},
+    )
+    assert r_bad.status_code == 403
+
+    r_ok = client.post(
+        "/api/v1/internal/users/06700956/ide-token",
+        headers={"X-Internal-Secret": internal_secret},
+    )
+    assert r_ok.status_code == 200
+    data = r_ok.json()
+    assert data["user_id"] == "06700956"
+    claims = jwt.decode(data["token"], mcp_secret, algorithms=["HS256"])
+    assert claims["iss"] == "ai-capability-hub"
+    assert claims["client_id"] == "ide-client"
+    assert claims["sub"] == "06700956"
+
+    # 停用员工后禁止签发 ide-token
+    client.post(
+        "/api/v1/internal/users/06700956/revoke",
+        json={"reason": "disabled"},
+        headers={"X-Internal-Secret": internal_secret},
+    )
+    r_disabled = client.post(
+        "/api/v1/internal/users/06700956/ide-token",
+        headers={"X-Internal-Secret": internal_secret},
+    )
+    assert r_disabled.status_code == 403
+
+
+def test_user_service_toggle_filters_list_tools_and_blocks_call_tool(integrated_client):
+    """个人装配开关关闭后，仅隐藏/拦截当前用户的工具（含 L0），不影响其他员工"""
+    from types import SimpleNamespace
+    from src.governance.auth import TokenPayload, current_user_cv
+    from src.governance.middleware import GovernanceMiddleware
+    from src.registry.models import ServiceStatus
+
+    client, store, rgone_secret, _mcp_secret, _internal_secret = integrated_client
+    emp1_jwt = _make_rgone_jwt(secret=rgone_secret, sub="06700956", role="employee")
+    emp2_jwt = _make_rgone_jwt(secret=rgone_secret, sub="06701099", role="employee")
+
+    async def _seed():
+        await store.register_service(
+            ServiceRegistration(
+                service_id="alpha_svc",
+                name="Alpha Service",
+                endpoint_url="http://127.0.0.1:9999/mcp",
+            )
+        )
+        await store.update_service_status("alpha_svc", ServiceStatus.ACTIVE)
+        await store.save_tools(
+            "alpha_svc",
+            [RegisteredTool(service_id="alpha_svc", name="hello", risk_level=ToolRiskLevel.L0)],
+        )
+
+    asyncio.run(_seed())
+
+    # 默认开启语义
+    caps_before = client.get(
+        "/api/v1/portal/capabilities",
+        headers={"Authorization": f"Bearer {emp1_jwt}"},
+    ).json()
+    assert any(c["id"] == "alpha_svc" and c["user_enabled"] is True for c in caps_before)
+
+    # emp1 关闭 alpha_svc 个人装配开关
+    r_off = client.put(
+        "/api/v1/portal/my-mcps/alpha_svc/toggle",
+        json={"enabled": False},
+        headers={"Authorization": f"Bearer {emp1_jwt}"},
+    )
+    assert r_off.status_code == 200
+    assert r_off.json()["user_enabled"] is False
+
+    caps_emp1 = client.get(
+        "/api/v1/portal/capabilities",
+        headers={"Authorization": f"Bearer {emp1_jwt}"},
+    ).json()
+    caps_emp2 = client.get(
+        "/api/v1/portal/capabilities",
+        headers={"Authorization": f"Bearer {emp2_jwt}"},
+    ).json()
+    assert any(c["id"] == "alpha_svc" and c["user_enabled"] is False for c in caps_emp1)
+    assert any(c["id"] == "alpha_svc" and c["user_enabled"] is True for c in caps_emp2)
+
+    mw = GovernanceMiddleware(store=store)
+
+    async def _verify_middleware():
+        fake_tool = SimpleNamespace(name="alpha_svc__hello")
+        ctx_list = SimpleNamespace(message=SimpleNamespace())
+
+        async def _call_next_list(_ctx):
+            return [fake_tool]
+
+        # emp1 被过滤
+        tok1 = current_user_cv.set(
+            TokenPayload(sub="06700956", client_id="ide-client", scopes=["hub:user"])
+        )
+        try:
+            emp1_tools = await mw.on_list_tools(ctx_list, _call_next_list)
+            assert len(emp1_tools) == 0
+
+            ctx_call = SimpleNamespace(message=SimpleNamespace(name="alpha_svc__hello", arguments={}))
+            async def _call_next_exec(_ctx):
+                return {"ok": True}
+
+            with pytest.raises(PermissionError, match="disabled in your personal settings"):
+                await mw.on_call_tool(ctx_call, _call_next_exec)
+        finally:
+            current_user_cv.reset(tok1)
+
+        # emp2 仍可见 L0 工具
+        tok2 = current_user_cv.set(
+            TokenPayload(sub="06701099", client_id="ide-client", scopes=["hub:user"])
+        )
+        try:
+            emp2_tools = await mw.on_list_tools(ctx_list, _call_next_list)
+            assert len(emp2_tools) == 1
+        finally:
+            current_user_cv.reset(tok2)
+
+    asyncio.run(_verify_middleware())
+
+    # 重新开启开关后恢复可见
+    r_on = client.put(
+        "/api/v1/portal/my-mcps/alpha_svc/toggle",
+        json={"enabled": True},
+        headers={"Authorization": f"Bearer {emp1_jwt}"},
+    )
+    assert r_on.status_code == 200 and r_on.json()["user_enabled"] is True
+
+
+def test_stateless_http_mcp_without_session_id(integrated_client):
+    """确认开启 stateless_http=True 后，无需携带 Mcp-Session-Id 也可连续无状态调用 /mcp"""
+    client, _store, rgone_secret, _mcp_secret, _internal_secret = integrated_client
+    emp_jwt = _make_rgone_jwt(secret=rgone_secret, sub="06700956", role="employee")
+    headers = {
+        "Authorization": f"Bearer {emp_jwt}",
+        "Accept": "application/json, text/event-stream",
+    }
+
+    init_resp = client.post(
+        "/mcp",
+        headers=headers,
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "pytest", "version": "1.0"},
+            },
+        },
+    )
+    assert init_resp.status_code == 200
+
+    # 不带 Mcp-Session-Id 直接发 tools/list 依然成功（无状态模式）
+    list_resp = client.post(
+        "/mcp",
+        headers=headers,
+        json={"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+    )
+    assert list_resp.status_code == 200
+    assert "tools" in list_resp.text
+

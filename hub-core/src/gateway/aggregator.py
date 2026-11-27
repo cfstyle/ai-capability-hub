@@ -100,8 +100,8 @@ class HubAggregator:
         logger.info("Mounted service: %s -> %s", service_id, endpoint_url)
 
     def get_asgi_app(self):
-        """返回可挂载到 FastAPI 的 ASGI app"""
-        return self.mcp.http_app(path="/")
+        """返回可挂载到 FastAPI 的 ASGI app（开启无状态 Streamable HTTP 以便网关反代与水平重启）"""
+        return self.mcp.http_app(path="/", stateless_http=True)
 
     async def unmount_service(self, service_id: str) -> None:
         """动态卸载服务（P2 feature）"""

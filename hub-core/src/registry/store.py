@@ -13,7 +13,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from src.registry.models import (
     CredentialFieldType,
@@ -313,6 +313,15 @@ class RegistryStore:
                         revoked_before INTEGER NOT NULL DEFAULT 0,
                         reason TEXT DEFAULT '',
                         updated_at TEXT NOT NULL
+                    );
+                """)
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS user_enabled_services (
+                        user_id TEXT NOT NULL,
+                        service_id TEXT NOT NULL,
+                        enabled INTEGER NOT NULL DEFAULT 1,
+                        updated_at TEXT NOT NULL,
+                        PRIMARY KEY (user_id, service_id)
                     );
                 """)
                 conn.commit()
@@ -957,6 +966,7 @@ class RegistryStore:
         q: Optional[str] = None,
         category: Optional[str] = None,
         sort_by: str = "popular",
+        user_id: Optional[str] = None,
     ) -> List[PortalCapabilityCard]:
         """获取门户公开能力卡片列表（严格脱敏、仅 active、真实调用量驱动）"""
         from datetime import timedelta
@@ -966,6 +976,14 @@ class RegistryStore:
                 cur = conn.cursor()
                 now_utc = datetime.now(timezone.utc)
                 seven_days_ago = (now_utc - timedelta(days=7)).isoformat()
+
+                disabled_service_ids: Set[str] = set()
+                if user_id and user_id.lower() != "guest":
+                    cur.execute(
+                        "SELECT service_id FROM user_enabled_services WHERE user_id = ? AND enabled = 0",
+                        (user_id,),
+                    )
+                    disabled_service_ids = {r["service_id"] for r in cur.fetchall()}
 
                 # 1. 查询所有 active 服务（绝不泄露草稿、未发布或停用服务）
                 cur.execute("SELECT * FROM services WHERE status = 'active' ORDER BY created_at ASC")
@@ -1033,6 +1051,7 @@ class RegistryStore:
                         auth_label=svc.auth_label,
                         auth_guide=svc.auth_guide,
                         auth_entry_url=svc.auth_entry_url,
+                        user_enabled=(svc.id not in disabled_service_ids),
                         call_count=stat["total_calls"],
                         recent_calls_7d=stat["recent_calls"],
                         last_active_at=stat["last_active"],
@@ -1648,6 +1667,12 @@ class RegistryStore:
                 cur.execute(f"SELECT * FROM services WHERE id IN ({placeholders})", list(service_ids))
                 service_rows = cur.fetchall()
 
+                cur.execute(
+                    "SELECT service_id FROM user_enabled_services WHERE user_id = ? AND enabled = 0",
+                    (user_id,),
+                )
+                disabled_service_ids = {r["service_id"] for r in cur.fetchall()}
+
                 items = []
                 for s_row in service_rows:
                     sid = s_row["id"]
@@ -1721,6 +1746,7 @@ class RegistryStore:
                         "credential_version": version,
                         "approved_tools": approved,
                         "pending_tools": pending,
+                        "user_enabled": (sid not in disabled_service_ids),
                         "updated_at": up_at,
                     })
 
@@ -1815,3 +1841,50 @@ class RegistryStore:
         if rec["revoked_before"] > 0 and int(token_iat or 0) <= rec["revoked_before"]:
             return True
         return False
+
+    async def get_user_disabled_service_ids(self, user_id: str) -> Set[str]:
+        """获取当前用户在个人装配开关中显式关闭的服务 ID 集合（无记录默认开启）"""
+        if not user_id or user_id.lower() == "guest":
+            return set()
+
+        def _sync_op() -> Set[str]:
+            with self._get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT service_id FROM user_enabled_services WHERE user_id = ? AND enabled = 0",
+                    (user_id,),
+                )
+                return {r["service_id"] for r in cur.fetchall()}
+
+        return await asyncio.to_thread(_sync_op)
+
+    async def set_user_service_enabled(
+        self,
+        user_id: str,
+        service_id: str,
+        enabled: bool,
+    ) -> Dict[str, Any]:
+        """更新当前用户对指定 MCP 服务的个人装配开关"""
+        now = _utc_now_iso()
+        enabled_int = 1 if enabled else 0
+
+        def _sync_op() -> Dict[str, Any]:
+            with self._get_connection() as conn:
+                conn.execute(
+                    """
+                    INSERT INTO user_enabled_services (user_id, service_id, enabled, updated_at)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(user_id, service_id)
+                    DO UPDATE SET enabled = excluded.enabled, updated_at = excluded.updated_at
+                    """,
+                    (user_id, service_id, enabled_int, now),
+                )
+                conn.commit()
+                return {
+                    "user_id": user_id,
+                    "service_id": service_id,
+                    "enabled": bool(enabled),
+                    "updated_at": now,
+                }
+
+        return await asyncio.to_thread(_sync_op)

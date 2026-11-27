@@ -9,7 +9,14 @@ services:
     environment:
       - HUB_ENV=production
       - HUB_LOG_LEVEL=${HUB_LOG_LEVEL:-INFO}
-      - HUB_ADMIN_API_KEY=${HUB_ADMIN_API_KEY:?HUB_ADMIN_API_KEY must be set in production}
+      - HUB_ADMIN_API_KEY=${HUB_ADMIN_API_KEY:-}
       - HUB_CREDENTIAL_ENCRYPTION_KEY=${HUB_CREDENTIAL_ENCRYPTION_KEY:?HUB_CREDENTIAL_ENCRYPTION_KEY must be set in production}
+      - HUB_PUBLIC_MCP_URL=${HUB_PUBLIC_MCP_URL:-}
+      - HUB_RGONE_JWT_SECRET=${HUB_RGONE_JWT_SECRET:?HUB_RGONE_JWT_SECRET must be set in production}
+      - HUB_RGONE_JWT_ISSUER=${HUB_RGONE_JWT_ISSUER:-rgone}
+      - HUB_MCP_JWT_SECRET=${HUB_MCP_JWT_SECRET:?HUB_MCP_JWT_SECRET must be set in production}
+      - HUB_HUB_JWT_ISSUER=${HUB_HUB_JWT_ISSUER:-${HUB_JWT_ISSUER:-ai-capability-hub}}
+      - HUB_TRUST_RGONE_ADMIN_JWT=${HUB_TRUST_RGONE_ADMIN_JWT:-true}
+      - HUB_INTERNAL_SERVICE_SECRET=${HUB_INTERNAL_SERVICE_SECRET:?HUB_INTERNAL_SERVICE_SECRET must be set in production}
       - TICM_ENDPOINT_URL=${TICM_ENDPOINT_URL:-https://ticm-mcp:8081/mcp}
       - SERVICES_DIR=/app/services
