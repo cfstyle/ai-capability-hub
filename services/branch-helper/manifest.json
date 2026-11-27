@@ -1,0 +1,50 @@
+{
+  "manifest_version": "1.0.0",
+  "service_id": "branch-helper",
+  "name": "网点运营助手 (测试插件)",
+  "version": "1.0.0",
+  "description": "遵循 ACH 规范的演示 MCP 插件：含 L0 公共外汇牌价查询与 L1 个人参数透传额度查询，用于测试 ZIP 上传、预检、发布、测连、在线调试与个人参数透传全流程。",
+  "author": "RgOne Architect",
+  "entrypoint": "server.py",
+  "protocol": "streamable-http",
+  "port": 8089,
+  "healthz_path": "/healthz",
+  "mcp_path": "/mcp",
+  "credential_schema": {
+    "enabled": true,
+    "auth_type": "custom_params",
+    "instructions": "请填写您的所属网点机构号及柜员校验口令（仅用于演示个人参数加密托管与网关透传，可任意填写测试值）",
+    "fields": [
+      {
+        "field_name": "branch_code",
+        "label": "网点机构号",
+        "field_type": "text",
+        "required": true,
+        "secret": false,
+        "placeholder": "例如 320682001"
+      },
+      {
+        "field_name": "operator_token",
+        "label": "柜员校验口令",
+        "field_type": "password",
+        "required": true,
+        "secret": true,
+        "placeholder": "任意测试口令"
+      }
+    ]
+  },
+  "tools": [
+    {
+      "name": "query_exchange_rate",
+      "description": "查询常用币种模拟参考牌价（L0 公开免参数，适合上传后立刻在线调试）",
+      "risk_level": "L0",
+      "requires_credentials": false
+    },
+    {
+      "name": "query_my_branch_quota",
+      "description": "查询当前网点当日审批额度（L1 需个人参数透传，验证前台绑定参数与后台允许透传开关）",
+      "risk_level": "L1",
+      "requires_credentials": true
+    }
+  ]
+}

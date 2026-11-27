@@ -513,9 +513,9 @@ class RegistryStore:
             with self._get_connection() as conn:
                 cur = conn.cursor()
                 if status:
-                    cur.execute("SELECT * FROM services WHERE status = ? ORDER BY created_at ASC", (status.value,))
+                    cur.execute("SELECT * FROM services WHERE status = ? ORDER BY created_at DESC", (status.value,))
                 else:
-                    cur.execute("SELECT * FROM services ORDER BY created_at ASC")
+                    cur.execute("SELECT * FROM services ORDER BY created_at DESC")
                 rows = cur.fetchall()
                 return [_row_to_service(r) for r in rows]
 
