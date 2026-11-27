@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from src.gateway.aggregator import HubAggregator
 from src.gateway.plugin_manager import plugin_manager, PluginValidationError
+from src.governance.auth import get_current_client_ip
 from src.governance.middleware import desensitize_params
 from src.registry.models import (
     CredentialTrustUpdate,
@@ -799,6 +800,7 @@ async def test_tool_call(
             "params_summary": clean_params,
             "result_status": f"rejected: tool '{tool_id}' not found",
             "duration_ms": duration_ms,
+            "client_ip": get_current_client_ip(),
         })
         raise HTTPException(status_code=404, detail=f"Tool '{tool_id}' not found")
 
@@ -814,6 +816,7 @@ async def test_tool_call(
             "params_summary": clean_params,
             "result_status": f"rejected: service '{tool.service_id}' not found",
             "duration_ms": duration_ms,
+            "client_ip": get_current_client_ip(),
         })
         raise HTTPException(status_code=404, detail=f"Service '{tool.service_id}' not found")
 
@@ -827,6 +830,7 @@ async def test_tool_call(
             "params_summary": clean_params,
             "result_status": f"rejected: service '{tool.service_id}' is {svc.status.value}",
             "duration_ms": duration_ms,
+            "client_ip": get_current_client_ip(),
         })
         raise HTTPException(
             status_code=403,
@@ -862,6 +866,7 @@ async def test_tool_call(
                 "params_summary": clean_params,
                 "result_status": status_str,
                 "duration_ms": duration_ms,
+                "client_ip": get_current_client_ip(),
             })
             return {
                 "tool_name": tool.name,
@@ -881,6 +886,7 @@ async def test_tool_call(
             "params_summary": clean_params,
             "result_status": f"exception: {exc}",
             "duration_ms": duration_ms,
+            "client_ip": get_current_client_ip(),
         })
         return {
             "tool_name": tool.name,

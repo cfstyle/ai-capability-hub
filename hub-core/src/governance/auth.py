@@ -58,6 +58,9 @@ class TokenPayload(BaseModel):
 current_user_cv: contextvars.ContextVar[Optional[TokenPayload]] = contextvars.ContextVar(
     "current_user_cv", default=None
 )
+current_client_ip_cv: contextvars.ContextVar[str] = contextvars.ContextVar(
+    "current_client_ip_cv", default=""
+)
 
 
 def get_current_user() -> Optional[TokenPayload]:
@@ -68,6 +71,11 @@ def get_current_user() -> Optional[TokenPayload]:
 def set_current_user(user: Optional[TokenPayload]) -> None:
     """设置当前请求上下文中的用户身份"""
     current_user_cv.set(user)
+
+
+def get_current_client_ip() -> str:
+    """获取当前请求上下文中的客户端真实来源 IP"""
+    return current_client_ip_cv.get()
 
 
 def _get_auth_settings() -> Dict[str, Any]:

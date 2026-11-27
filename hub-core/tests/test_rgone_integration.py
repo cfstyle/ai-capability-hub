@@ -473,3 +473,85 @@ def test_startup_ticm_manifest_sync_and_backfill_preserves_trust(tmp_path, monke
         assert pt2.risk_level == ToolRiskLevel.L1
         assert pt2.requires_credentials is True
 
+
+def test_audit_log_records_client_ip_and_non_username_cred_summary(integrated_client):
+    """审计日志正确记录 X-Forwarded-For 来源 IP，且非 username 凭据摘要返回首个非保密字段 label 与值"""
+    from src.registry.models import CredentialFieldSchema, CredentialFieldType, ServiceCredentialSchema
+
+    client, store, rgone_secret, _mcp_secret, _internal_secret = integrated_client
+    admin_jwt = _make_rgone_jwt(secret=rgone_secret, sub="admin", role="admin")
+    emp_jwt = _make_rgone_jwt(secret=rgone_secret, sub="06700956", role="employee")
+
+    async def _seed():
+        await store.register_service(
+            ServiceRegistration(
+                service_id="branch_svc",
+                name="网点柜面服务",
+                endpoint_url="http://127.0.0.1:19999/mcp",
+                credential_schema=ServiceCredentialSchema(
+                    enabled=True,
+                    auth_type="branch_token",
+                    instructions="请填写网点机构号与操作员令牌",
+                    fields=[
+                        CredentialFieldSchema(
+                            field_name="branch_code",
+                            label="网点机构号",
+                            field_type=CredentialFieldType.TEXT,
+                            required=True,
+                            secret=False,
+                        ),
+                        CredentialFieldSchema(
+                            field_name="operator_token",
+                            label="操作员令牌",
+                            field_type=CredentialFieldType.PASSWORD,
+                            required=True,
+                            secret=True,
+                        ),
+                    ],
+                ),
+            )
+        )
+        await store.save_tools(
+            "branch_svc",
+            [RegisteredTool(service_id="branch_svc", name="query_teller", risk_level=ToolRiskLevel.L1, requires_credentials=True)],
+        )
+
+    asyncio.run(_seed())
+
+    # 1. 员工绑定非 username 凭据并校验 /portal/my-mcps 返回 display_label / display_value
+    bind_resp = client.post(
+        "/api/v1/portal/my-mcps/branch_svc/binding",
+        json={"credentials": {"branch_code": "320682001", "operator_token": "tok_secret_999"}},
+        headers={"Authorization": f"Bearer {emp_jwt}"},
+    )
+    assert bind_resp.status_code == 200, bind_resp.text
+
+    my_mcps = client.get(
+        "/api/v1/portal/my-mcps",
+        headers={"Authorization": f"Bearer {emp_jwt}"},
+    ).json()
+    branch_item = next((m for m in my_mcps if m["service_id"] == "branch_svc"), None)
+    assert branch_item is not None
+    assert branch_item["credential_summary"]["display_label"] == "网点机构号"
+    assert branch_item["credential_summary"]["display_value"] == "320682001"
+    assert "tok_secret_999" not in str(branch_item)
+
+    # 2. 通过带 X-Forwarded-For 的工具测试触发审计日志落库并校验 client_ip
+    client.post(
+        "/api/v1/tools/branch_svc__query_teller/test",
+        json={"arguments": {"teller": "01"}},
+        headers={
+            "Authorization": f"Bearer {admin_jwt}",
+            "X-Forwarded-For": "10.88.12.34, 172.17.0.1",
+        },
+    )
+    logs_resp = client.get(
+        "/api/v1/audit-logs",
+        params={"service_id": "branch_svc"},
+        headers={"Authorization": f"Bearer {admin_jwt}"},
+    )
+    assert logs_resp.status_code == 200
+    items = logs_resp.json()["items"]
+    assert len(items) >= 1
+    assert items[0]["client_ip"] == "10.88.12.34"
+

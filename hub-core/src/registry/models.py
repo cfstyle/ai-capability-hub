@@ -337,6 +337,7 @@ class InvocationLogItem(BaseModel):
     params_summary: Dict[str, Any] = Field(default_factory=dict, description="脱敏入参")
     result_status: str = Field(..., description="执行结果状态")
     duration_ms: float = Field(..., description="调用耗时（毫秒）")
+    client_ip: str = Field(default="", description="请求来源 IP")
     trace_id: Optional[str] = Field(default="", description="链路追踪 ID")
 
 

@@ -21,7 +21,7 @@ from fastmcp.tools.base import Tool
 from mcp import types as mt
 
 from src.governance.audit import AuditLogger
-from src.governance.auth import TokenPayload, get_current_user
+from src.governance.auth import TokenPayload, get_current_client_ip, get_current_user
 from src.registry.models import ServiceStatus, ToolRiskLevel
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
@@ -175,6 +175,7 @@ class GovernanceMiddleware(Middleware):
         user = get_current_user()
         user_id = user.sub if user else "guest"
         client_id = user.client_id if user and user.client_id else "mcp-client"
+        client_ip = get_current_client_ip()
 
         start_time = time.time()
         service_id = tool_name.split("__")[0] if "__" in tool_name else (tool_name.split("_")[0] if "_" in tool_name else "hub")
@@ -204,6 +205,7 @@ class GovernanceMiddleware(Middleware):
                         "params_summary": clean_params,
                         "result_status": status_str,
                         "duration_ms": dur_ms,
+                        "client_ip": client_ip,
                     })
                 except Exception as log_exc:
                     logger.warning("Failed to persist invocation log: %s", log_exc)

@@ -17,7 +17,7 @@ from src.api.router import _apply_manifest_tool_overrides, api_router, discover_
 from src.config import load_config
 from src.gateway.aggregator import create_aggregator
 from src.gateway.plugin_manager import plugin_manager
-from src.governance.auth import TokenPayload, current_user_cv, verify_token
+from src.governance.auth import TokenPayload, current_client_ip_cv, current_user_cv, verify_token
 from src.registry.models import ServiceCredentialSchema, ServiceRegistration, ServiceStatus
 from src.registry.store import RegistryStore
 
@@ -67,61 +67,82 @@ class AuthContextMiddleware:
             "body": body,
         })
 
+    @staticmethod
+    def _extract_client_ip(scope: Scope) -> str:
+        header_map = {k.lower(): v.decode("latin1").strip() for k, v in scope.get("headers", [])}
+        xff = header_map.get(b"x-forwarded-for", "")
+        if xff:
+            first_ip = xff.split(",")[0].strip()
+            if first_ip:
+                return first_ip
+        x_real_ip = header_map.get(b"x-real-ip", "").strip()
+        if x_real_ip:
+            return x_real_ip
+        client = scope.get("client")
+        if isinstance(client, (list, tuple)) and client and client[0]:
+            return str(client[0])
+        return ""
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] in ("http", "websocket"):
-            token = None
-            for key, val in scope.get("headers", []):
-                if key.lower() == b"authorization":
-                    raw_val = val.decode("latin1").strip()
-                    if raw_val.lower().startswith("bearer "):
-                        token = raw_val[7:].strip()
-                    elif raw_val:
-                        token = raw_val
-                    break
-
-            if not token:
-                query_string = scope.get("query_string", b"").decode("latin1")
-                if query_string:
-                    params = parse_qs(query_string)
-                    if "token" in params and params["token"]:
-                        token = params["token"][0]
-
-            path = scope.get("path", "")
-            user_payload = None
-            token_error: Optional[str] = None
-            if token:
-                try:
-                    user_payload = verify_token(token)
-                except Exception as exc:
-                    logger.debug("Token verify note: %s", exc)
-                    token_error = "凭证无效或已过期"
-
-                if user_payload is not None:
-                    fastapi_app = scope.get("app")
-                    store = getattr(getattr(fastapi_app, "state", None), "store", None)
-                    if store is not None and await store.is_token_revoked(user_payload.sub, user_payload.iat):
-                        token_error = "用户账号已停用或凭证已被吊销"
-                        user_payload = None
-
-            # 已被吊销或显式携带无效凭证访问 /mcp 时，绝不降级为 guest 逃逸 L0 限制
-            if token_error and scope["type"] == "http":
-                if token_error == "用户账号已停用或凭证已被吊销" or path.startswith("/mcp"):
-                    await self._send_unauthorized(send, token_error)
-                    return
-
-            if not user_payload:
-                user_payload = TokenPayload(
-                    sub="guest",
-                    client_id="anonymous",
-                    scopes=["hub:services:read", "hub:tools:call"],
-                    exp=0,
-                )
-
-            reset_token = current_user_cv.set(user_payload)
+            client_ip = self._extract_client_ip(scope)
+            ip_token = current_client_ip_cv.set(client_ip)
             try:
-                await self.app(scope, receive, send)
+                token = None
+                for key, val in scope.get("headers", []):
+                    if key.lower() == b"authorization":
+                        raw_val = val.decode("latin1").strip()
+                        if raw_val.lower().startswith("bearer "):
+                            token = raw_val[7:].strip()
+                        elif raw_val:
+                            token = raw_val
+                        break
+
+                if not token:
+                    query_string = scope.get("query_string", b"").decode("latin1")
+                    if query_string:
+                        params = parse_qs(query_string)
+                        if "token" in params and params["token"]:
+                            token = params["token"][0]
+
+                path = scope.get("path", "")
+                user_payload = None
+                token_error: Optional[str] = None
+                if token:
+                    try:
+                        user_payload = verify_token(token)
+                    except Exception as exc:
+                        logger.debug("Token verify note: %s", exc)
+                        token_error = "凭证无效或已过期"
+
+                    if user_payload is not None:
+                        fastapi_app = scope.get("app")
+                        store = getattr(getattr(fastapi_app, "state", None), "store", None)
+                        if store is not None and await store.is_token_revoked(user_payload.sub, user_payload.iat):
+                            token_error = "用户账号已停用或凭证已被吊销"
+                            user_payload = None
+
+                # 已被吊销或显式携带无效凭证访问 /mcp 时，绝不降级为 guest 逃逸 L0 限制
+                if token_error and scope["type"] == "http":
+                    if token_error == "用户账号已停用或凭证已被吊销" or path.startswith("/mcp"):
+                        await self._send_unauthorized(send, token_error)
+                        return
+
+                if not user_payload:
+                    user_payload = TokenPayload(
+                        sub="guest",
+                        client_id="anonymous",
+                        scopes=["hub:services:read", "hub:tools:call"],
+                        exp=0,
+                    )
+
+                reset_token = current_user_cv.set(user_payload)
+                try:
+                    await self.app(scope, receive, send)
+                finally:
+                    current_user_cv.reset(reset_token)
             finally:
-                current_user_cv.reset(reset_token)
+                current_client_ip_cv.reset(ip_token)
         else:
             await self.app(scope, receive, send)
 

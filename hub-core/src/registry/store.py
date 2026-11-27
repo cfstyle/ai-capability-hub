@@ -240,9 +240,14 @@ class RegistryStore:
                         params_summary TEXT NOT NULL,
                         result_status TEXT NOT NULL,
                         duration_ms REAL NOT NULL,
+                        client_ip TEXT DEFAULT '',
                         trace_id TEXT DEFAULT ''
                     );
                 """)
+                cur.execute("PRAGMA table_info(invocation_logs);")
+                log_cols = {col["name"] for col in cur.fetchall()}
+                if "client_ip" not in log_cols:
+                    conn.execute("ALTER TABLE invocation_logs ADD COLUMN client_ip TEXT DEFAULT '';")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_timestamp ON invocation_logs(timestamp);")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_logs_service ON invocation_logs(service_id);")
 
@@ -936,8 +941,8 @@ class RegistryStore:
             with self._get_connection() as conn:
                 cur = conn.cursor()
                 cur.execute("""
-                    INSERT INTO invocation_logs (id, timestamp, user_id, client_id, service_id, tool_name, params_summary, result_status, duration_ms, trace_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO invocation_logs (id, timestamp, user_id, client_id, service_id, tool_name, params_summary, result_status, duration_ms, client_ip, trace_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     log_id,
                     ts,
@@ -948,6 +953,7 @@ class RegistryStore:
                     params_str,
                     entry.get("result_status", "unknown"),
                     float(entry.get("duration_ms", 0.0)),
+                    entry.get("client_ip", "") or "",
                     entry.get("trace_id", "") or "",
                 ))
                 conn.commit()
@@ -994,6 +1000,7 @@ class RegistryStore:
                         params_summary = json.loads(r["params_summary"])
                     except Exception:
                         pass
+                    r_keys = set(r.keys())
                     items.append(
                         InvocationLogItem(
                             id=r["id"],
@@ -1005,6 +1012,7 @@ class RegistryStore:
                             params_summary=params_summary,
                             result_status=r["result_status"],
                             duration_ms=r["duration_ms"],
+                            client_ip=(r["client_ip"] or "") if "client_ip" in r_keys else "",
                             trace_id=r["trace_id"] or "",
                         )
                     )
@@ -1864,6 +1872,23 @@ class RegistryStore:
                             cred_summary = json.loads(binding_row["credential_summary"])
                         except Exception:
                             cred_summary = {}
+                        if isinstance(cred_summary, dict):
+                            display_label = ""
+                            display_value = ""
+                            if svc.credential_schema and svc.credential_schema.fields:
+                                for field in svc.credential_schema.fields:
+                                    if not field.secret:
+                                        val = cred_summary.get(field.field_name)
+                                        if val not in (None, ""):
+                                            display_label = field.label
+                                            display_value = str(val)
+                                            break
+                            if not display_value and cred_summary.get("username"):
+                                display_label = "业务账号"
+                                display_value = str(cred_summary["username"])
+                            if display_label and display_value:
+                                cred_summary["display_label"] = display_label
+                                cred_summary["display_value"] = display_value
                         version = binding_row["credential_version"]
                         up_at = binding_row["updated_at"]
 
