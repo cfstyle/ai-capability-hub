@@ -384,3 +384,92 @@ def test_stateless_http_mcp_without_session_id(integrated_client):
     assert list_resp.status_code == 200
     assert "tools" in list_resp.text
 
+
+def test_startup_ticm_manifest_sync_and_backfill_preserves_trust(tmp_path, monkeypatch):
+    """启动时自动同步 services/ticm-mcp/manifest.json 的凭据字段与工具策略，并在旧库平滑补全时不覆盖信任状态"""
+    import json
+
+    db_file = tmp_path / "ticm_manifest_sync.db"
+    rgone_secret = "test-rgone-shared-jwt-secret-9988"
+    monkeypatch.setenv("HUB_ENV", "development")
+    monkeypatch.setenv("HUB_DATABASE_URL", f"sqlite:///{db_file}")
+    monkeypatch.setenv("HUB_UPSTREAM_SERVICES", json.dumps([
+        {"service_id": "ticm", "endpoint_url": "http://127.0.0.1:18081/mcp", "enabled": True}
+    ]))
+    monkeypatch.setenv("HUB_RGONE_JWT_SECRET", rgone_secret)
+    monkeypatch.setenv("HUB_MCP_JWT_SECRET", "test-hub-mcp-jwt-secret-7766")
+    monkeypatch.setenv("HUB_INTERNAL_SERVICE_SECRET", "test-internal-sync-secret-5544")
+    monkeypatch.delenv("HUB_ADMIN_API_KEY", raising=False)
+
+    # 1. 全新数据库启动：应自动写入 manifest.json 中的 credential_schema 与 ticm__portfolio_summary (L1, requires_credentials=True)
+    load_config.cache_clear()
+    app1 = build_app()
+    with TestClient(app1):
+        svc = asyncio.run(app1.state.store.get_service("ticm"))
+        assert svc is not None
+        assert svc.credential_schema is not None
+        assert svc.credential_schema.enabled is True
+        labels = [f.label for f in svc.credential_schema.fields]
+        assert "TICM 用户名" in labels
+        assert "TICM 登录密码" in labels
+
+        tools = asyncio.run(app1.state.store.list_tools("ticm"))
+        portfolio_tool = next((t for t in tools if "portfolio_summary" in t.name), None)
+        assert portfolio_tool is not None
+        assert portfolio_tool.risk_level == ToolRiskLevel.L1
+        assert portfolio_tool.requires_credentials is True
+
+    # 2. 旧数据库已存在 ticm 但 credential_schema 为空、工具仍为默认 L0/False，且管理员已开启 trusted_credential_recipient=True
+    db_backfill = tmp_path / "ticm_backfill.db"
+    monkeypatch.setenv("HUB_DATABASE_URL", f"sqlite:///{db_backfill}")
+    monkeypatch.setenv("HUB_UPSTREAM_SERVICES", "[]")
+    load_config.cache_clear()
+    seed_app = build_app()
+    with TestClient(seed_app):
+        async def _seed_old_db():
+            await seed_app.state.store.register_service(
+                ServiceRegistration(
+                    service_id="ticm",
+                    name="TICM MCP Server",
+                    endpoint_url="http://127.0.0.1:18081/mcp",
+                    description="Auto-configured upstream service ticm",
+                    credential_schema=None,
+                )
+            )
+            await seed_app.state.store.confirm_credential_trust("ticm", True, confirmed_by="admin")
+            await seed_app.state.store.save_tools(
+                "ticm",
+                [
+                    RegisteredTool(
+                        service_id="ticm",
+                        name="ticm__portfolio_summary",
+                        risk_level=ToolRiskLevel.L0,
+                        requires_credentials=False,
+                    )
+                ],
+                preserve_policies=False,
+            )
+
+        asyncio.run(_seed_old_db())
+
+    # 携带 upstream ticm 重新启动，验证平滑补全且保留 trusted_credential_recipient=True
+    monkeypatch.setenv("HUB_UPSTREAM_SERVICES", json.dumps([
+        {"service_id": "ticm", "endpoint_url": "http://127.0.0.1:18081/mcp", "enabled": True}
+    ]))
+    load_config.cache_clear()
+    app2 = build_app()
+    with TestClient(app2):
+        svc2 = asyncio.run(app2.state.store.get_service("ticm"))
+        assert svc2 is not None
+        assert svc2.credential_schema is not None
+        assert svc2.credential_schema.enabled is True
+        assert [f.field_name for f in svc2.credential_schema.fields] == ["username", "password"]
+        assert svc2.trusted_credential_recipient is True
+        assert svc2.trusted_confirmed_by == "admin"
+
+        tools2 = asyncio.run(app2.state.store.list_tools("ticm"))
+        pt2 = next((t for t in tools2 if "portfolio_summary" in t.name), None)
+        assert pt2 is not None
+        assert pt2.risk_level == ToolRiskLevel.L1
+        assert pt2.requires_credentials is True
+

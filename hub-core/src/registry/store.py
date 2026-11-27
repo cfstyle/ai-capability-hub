@@ -750,6 +750,143 @@ class RegistryStore:
             return None
         return await self.get_service(service_id)
 
+    async def sync_service_manifest_defaults(
+        self,
+        service_id: str,
+        credential_schema: Optional[ServiceCredentialSchema] = None,
+        manifest_tools: Optional[List[Dict[str, Any]]] = None,
+        manifest_meta: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """启动时基于 manifest.json 平滑补全凭据声明与工具策略，严禁覆盖管理员确认的信任状态"""
+        now = _utc_now_iso()
+        cred_json = (
+            json.dumps(credential_schema.model_dump(), ensure_ascii=False)
+            if credential_schema
+            else None
+        )
+
+        def _sync_op() -> None:
+            with self._get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("SELECT * FROM services WHERE id = ?", (service_id,))
+                svc_row = cur.fetchone()
+                if not svc_row:
+                    return
+
+                # 1. 仅当 DB 中 credential_schema 为空时平滑补全，绝不修改 trusted_* 列
+                if cred_json and not svc_row["credential_schema"]:
+                    placeholder_name = f"{service_id.upper()} MCP Server"
+                    placeholder_desc = f"Auto-configured upstream service {service_id}"
+                    new_name = (
+                        str(manifest_meta.get("name"))
+                        if (manifest_meta and manifest_meta.get("name") and svc_row["name"] == placeholder_name)
+                        else svc_row["name"]
+                    )
+                    new_desc = (
+                        str(manifest_meta.get("description"))
+                        if (
+                            manifest_meta
+                            and manifest_meta.get("description")
+                            and svc_row["description"] == placeholder_desc
+                        )
+                        else svc_row["description"]
+                    )
+                    new_ver = (
+                        str(manifest_meta.get("version"))
+                        if (manifest_meta and manifest_meta.get("version") and (svc_row["version"] in ("0.0.0", "1.0.0", "")))
+                        else svc_row["version"]
+                    )
+                    cur.execute(
+                        """
+                        UPDATE services
+                        SET name = ?, description = ?, version = ?, credential_schema = ?, updated_at = ?
+                        WHERE id = ?
+                        """,
+                        (new_name, new_desc, new_ver, cred_json, now, service_id),
+                    )
+
+                # 2. 同步工具风险分级与个人凭据声明
+                if manifest_tools:
+                    cur.execute(
+                        "SELECT id, name, risk_level, requires_confirmation, requires_credentials FROM tools WHERE service_id = ?",
+                        (service_id,),
+                    )
+                    existing_tools = cur.fetchall()
+                    manifest_map: Dict[str, Dict[str, Any]] = {}
+                    for mt in manifest_tools:
+                        if isinstance(mt, dict) and mt.get("name"):
+                            raw_n = str(mt["name"]).strip()
+                            manifest_map[raw_n] = mt
+                            if raw_n.startswith(f"{service_id}__"):
+                                manifest_map[raw_n[len(service_id) + 2 :]] = mt
+
+                    if not existing_tools:
+                        seed_rows = []
+                        for mt in manifest_tools:
+                            if not isinstance(mt, dict) or not mt.get("name"):
+                                continue
+                            t_name = str(mt["name"]).strip()
+                            risk_raw = str(mt.get("risk_level") or "L0")
+                            risk_val = risk_raw if risk_raw in ("L0", "L1", "L2", "L3") else "L0"
+                            req_confirm = 1 if (mt.get("requires_confirmation") or risk_val in ("L2", "L3")) else 0
+                            req_creds = 1 if mt.get("requires_credentials") else 0
+                            tool_id = f"{service_id}__{t_name}"
+                            seed_rows.append((
+                                tool_id,
+                                service_id,
+                                t_name,
+                                str(mt.get("description") or ""),
+                                "{}",
+                                risk_val,
+                                req_confirm,
+                                req_creds,
+                                now,
+                            ))
+                        if seed_rows:
+                            cur.executemany(
+                                """
+                                INSERT INTO tools (id, service_id, name, description, input_schema, risk_level, requires_confirmation, requires_credentials, created_at)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """,
+                                seed_rows,
+                            )
+                    else:
+                        for er in existing_tools:
+                            candidates = [er["name"], f"{service_id}__{er['name']}"]
+                            if er["name"].startswith(f"{service_id}__"):
+                                candidates.append(er["name"][len(service_id) + 2 :])
+                            mt = next((manifest_map[c] for c in candidates if c in manifest_map), None)
+                            if not mt:
+                                continue
+                            new_risk = er["risk_level"]
+                            new_confirm = er["requires_confirmation"]
+                            new_creds = er["requires_credentials"]
+                            changed = False
+
+                            m_risk = str(mt.get("risk_level") or "")
+                            if m_risk in ("L1", "L2", "L3") and er["risk_level"] == "L0":
+                                new_risk = m_risk
+                                if m_risk in ("L2", "L3") or mt.get("requires_confirmation"):
+                                    new_confirm = 1
+                                changed = True
+                            if mt.get("requires_credentials") and not er["requires_credentials"]:
+                                new_creds = 1
+                                changed = True
+
+                            if changed:
+                                cur.execute(
+                                    """
+                                    UPDATE tools
+                                    SET risk_level = ?, requires_confirmation = ?, requires_credentials = ?
+                                    WHERE id = ?
+                                    """,
+                                    (new_risk, new_confirm, new_creds, er["id"]),
+                                )
+
+                conn.commit()
+
+        await asyncio.to_thread(_sync_op)
+
     async def update_tool_policy(
         self,
         tool_id: str,

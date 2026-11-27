@@ -241,12 +241,21 @@ async def discover_tools(endpoint_url: str, service_id: str) -> List[RegisteredT
 
 def _apply_manifest_tool_overrides(tools: List[RegisteredTool], manifest: Dict[str, Any]) -> None:
     """按声明优先级合并 manifest.json 工具元数据（manifest 显式声明 > MCP tool meta > 库内旧值）"""
-    manifest_tool_map = {
-        t["name"]: t for t in manifest.get("tools", []) if isinstance(t, dict) and "name" in t
-    }
+    service_id = str(manifest.get("service_id") or "").strip()
+    manifest_tool_map: Dict[str, Dict[str, Any]] = {}
+    for t in manifest.get("tools", []):
+        if isinstance(t, dict) and t.get("name"):
+            raw_name = str(t["name"]).strip()
+            manifest_tool_map[raw_name] = t
+            if service_id and raw_name.startswith(f"{service_id}__"):
+                manifest_tool_map[raw_name[len(service_id) + 2 :]] = t
+
     for tool in tools:
-        if tool.name in manifest_tool_map:
-            m_tool = manifest_tool_map[tool.name]
+        candidates = [tool.name, f"{tool.service_id}__{tool.name}"]
+        if tool.name.startswith(f"{tool.service_id}__"):
+            candidates.append(tool.name[len(tool.service_id) + 2 :])
+        m_tool = next((manifest_tool_map[k] for k in candidates if k in manifest_tool_map), None)
+        if m_tool:
             declared_risk = m_tool.get("risk_level")
             if declared_risk in [ToolRiskLevel.L0, ToolRiskLevel.L1, ToolRiskLevel.L2, ToolRiskLevel.L3]:
                 tool.risk_level = ToolRiskLevel(declared_risk)

@@ -13,14 +13,34 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from urllib.parse import parse_qs
 
 from src.api.portal import portal_router
-from src.api.router import api_router, discover_tools
+from src.api.router import _apply_manifest_tool_overrides, api_router, discover_tools
 from src.config import load_config
 from src.gateway.aggregator import create_aggregator
+from src.gateway.plugin_manager import plugin_manager
 from src.governance.auth import TokenPayload, current_user_cv, verify_token
-from src.registry.models import ServiceRegistration, ServiceStatus
+from src.registry.models import ServiceCredentialSchema, ServiceRegistration, ServiceStatus
 from src.registry.store import RegistryStore
 
 logger = logging.getLogger(__name__)
+
+
+def _load_upstream_manifest(service_id: str) -> Optional[dict]:
+    """查找并解析上游内置服务目录中的 manifest.json（优先 services/{service_id}-mcp）"""
+    import json
+
+    candidates = [
+        plugin_manager.services_dir / f"{service_id}-mcp" / "manifest.json",
+        plugin_manager.services_dir / service_id / "manifest.json",
+    ]
+    for path in candidates:
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if isinstance(data, dict):
+                    return data
+            except Exception as exc:
+                logger.warning("Failed to parse upstream manifest at %s: %s", path, exc)
+    return None
 
 
 class AuthContextMiddleware:
@@ -135,21 +155,56 @@ def build_app() -> FastAPI:
         # 加载并自动同步初始 upstream_services 到数据库与聚合代理
         for svc in config.upstream_services:
             if svc.enabled:
+                manifest = _load_upstream_manifest(svc.service_id)
+                manifest_cred_schema: Optional[ServiceCredentialSchema] = None
+                if manifest and isinstance(manifest.get("credential_schema"), dict):
+                    try:
+                        manifest_cred_schema = ServiceCredentialSchema(**manifest["credential_schema"])
+                    except Exception as cred_exc:
+                        logger.warning(
+                            "Invalid credential_schema in manifest for %s: %s",
+                            svc.service_id,
+                            cred_exc,
+                        )
+
                 existing = await store.get_service(svc.service_id)
                 if not existing:
                     reg = ServiceRegistration(
                         service_id=svc.service_id,
-                        name=f"{svc.service_id.upper()} MCP Server",
+                        name=(manifest.get("name") if manifest else None)
+                        or f"{svc.service_id.upper()} MCP Server",
+                        version=str((manifest.get("version") if manifest else None) or "1.0.0"),
                         endpoint_url=svc.endpoint_url,
-                        description=f"Auto-configured upstream service {svc.service_id}",
+                        description=(manifest.get("description") if manifest else None)
+                        or f"Auto-configured upstream service {svc.service_id}",
+                        owner=(manifest.get("author") if manifest else None) or "",
+                        credential_schema=manifest_cred_schema,
                     )
                     await store.register_service(reg)
+                    discovered_saved = False
                     try:
                         tools = await discover_tools(svc.endpoint_url, svc.service_id)
                         if tools:
+                            if manifest:
+                                _apply_manifest_tool_overrides(tools, manifest)
                             await store.save_tools(svc.service_id, tools)
+                            discovered_saved = True
                     except Exception as disc_exc:
                         logger.warning("Startup discover_tools for %s: %s", svc.service_id, disc_exc)
+                    if not discovered_saved and manifest and manifest.get("tools"):
+                        await store.sync_service_manifest_defaults(
+                            svc.service_id,
+                            credential_schema=manifest_cred_schema,
+                            manifest_tools=manifest.get("tools"),
+                            manifest_meta=manifest,
+                        )
+                elif manifest:
+                    await store.sync_service_manifest_defaults(
+                        svc.service_id,
+                        credential_schema=manifest_cred_schema,
+                        manifest_tools=manifest.get("tools"),
+                        manifest_meta=manifest,
+                    )
 
                 try:
                     aggregator.mount_service(svc.service_id, svc.endpoint_url)
