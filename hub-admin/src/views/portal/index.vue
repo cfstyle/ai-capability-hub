@@ -1,9 +1,9 @@
 <template>
   <div class="portal-root">
     <!-- ====================================================================
-         1. 顶部全局导航栏 (Top Navigation Bar)
+         1. 顶部全局导航栏 (嵌入 RgOne ?embed=1 时隐藏主导航，展示轻量级功能操作条)
          ==================================================================== -->
-    <header class="portal-header">
+    <header v-if="!isEmbedded" class="portal-header">
       <div class="portal-header__inner">
         <!-- 品牌标识 -->
         <div class="brand-group" title="返回能力中心首页" @click="resetFilters">
@@ -180,6 +180,58 @@
         </div>
       </div>
     </header>
+
+    <!-- 嵌入模式下的轻量级工具条（保留搜索、一键接入与个人 MCP 管理入口） -->
+    <div v-if="isEmbedded" class="embed-toolbar">
+      <div class="embed-toolbar__inner">
+        <div class="header-search embed-search">
+          <Search :size="16" class="search-icon" />
+          <input
+            ref="searchInputRef"
+            v-model="searchKeyword"
+            type="text"
+            placeholder="搜业务场景、能力服务或工具... (Ctrl+K)"
+            class="search-input"
+            @input="handleSearchInput"
+          />
+          <button
+            v-if="searchKeyword"
+            type="button"
+            class="search-clear-btn"
+            title="清空搜索"
+            @click="clearSearch"
+          >
+            <X :size="14" />
+          </button>
+        </div>
+        <div class="embed-toolbar__actions">
+          <button type="button" class="action-btn global-access-btn" @click="handleAccessClick()">
+            <Zap :size="15" />
+            <span>一键接入</span>
+          </button>
+          <template v-if="isLoggedIn">
+            <button type="button" class="embed-pill-btn" @click="handleMenuMyMcps">
+              <Layers :size="15" />
+              <span>我的 MCP</span>
+              <span v-if="myMcpsList.length > 0" class="badge-count">{{ myMcpsList.length }}</span>
+            </button>
+            <button type="button" class="embed-pill-btn" @click="handleMenuMyRequests">
+              <ListChecks :size="15" />
+              <span>申请记录</span>
+              <span v-if="pendingRequestsCount > 0" class="badge-count">{{ pendingRequestsCount }}</span>
+            </button>
+          </template>
+          <button v-else type="button" class="action-btn login-btn" @click="openLoginModal">
+            <User :size="15" />
+            <span>工号登录</span>
+          </button>
+          <button type="button" class="embed-pill-btn" @click="handleMenuGuide">
+            <BookOpen :size="15" />
+            <span>接入指引</span>
+          </button>
+        </div>
+      </div>
+    </div>
 
     <!-- ====================================================================
          2. 首屏 Hero 区域与真实活跃度指标条
@@ -1466,16 +1518,64 @@ const expandedTools = ref<Set<string>>(new Set())
 // 5. 新手指南模态框
 const guideModalVisible = ref(false)
 
-// 6. 用户身份与认证状态体系 (严格以 localStorage portal_user_id 为准，未设置时严格为未登录)
-const savedUserId = localStorage.getItem('portal_user_id')
-const savedUserName = localStorage.getItem('portal_user_name')
-const savedUserRole = localStorage.getItem('portal_user_role')
+// 6. 用户身份与认证状态体系（优先同源共享 RgOne 小秘书登录态，其次回退独立门户状态）
+const isEmbedded = computed(() => {
+  if (typeof window === 'undefined') return false
+  try {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('embed') === '1' || window.self !== window.top
+  } catch {
+    return false
+  }
+})
 
-// 只有当 savedUserId 存在且非空时才为登录状态
-const isLoggedIn = ref(Boolean(savedUserId && savedUserId.trim() !== ''))
-const currentUserId = ref(isLoggedIn.value ? savedUserId!.trim() : '')
-const currentUserName = ref(isLoggedIn.value ? (savedUserName?.trim() || savedUserId!.trim()) : '未登录')
-const currentUserRole = ref(isLoggedIn.value ? (savedUserRole?.trim() || 'user') : 'guest')
+function decodeJwtClaims(token: string): Record<string, any> | null {
+  try {
+    const parts = token.split('.')
+    if (parts.length < 2) return null
+    const base64 = parts[1].replace(/-/g, '+').replace(/_/g, '/')
+    const padded = base64 + '='.repeat((4 - (base64.length % 4)) % 4)
+    const jsonStr = decodeURIComponent(
+      atob(padded)
+        .split('')
+        .map(c => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    )
+    return JSON.parse(jsonStr)
+  } catch {
+    return null
+  }
+}
+
+function readIdentitySnapshot() {
+  const rgoneToken = localStorage.getItem('rgone_emp_token') || ''
+  if (rgoneToken) {
+    const claims = decodeJwtClaims(rgoneToken)
+    const uid = (localStorage.getItem('rgone_emp_no') || claims?.sub || '').trim()
+    const uname = (localStorage.getItem('rgone_emp_name') || claims?.name || uid).trim()
+    if (uid) {
+      return { loggedIn: true, uid, uname: uname || uid, role: 'user' }
+    }
+  }
+  const savedUserId = localStorage.getItem('portal_user_id')
+  const savedUserName = localStorage.getItem('portal_user_name')
+  const savedUserRole = localStorage.getItem('portal_user_role')
+  if (savedUserId && savedUserId.trim() !== '') {
+    return {
+      loggedIn: true,
+      uid: savedUserId.trim(),
+      uname: savedUserName?.trim() || savedUserId.trim(),
+      role: savedUserRole?.trim() || 'user',
+    }
+  }
+  return { loggedIn: false, uid: '', uname: '未登录', role: 'guest' }
+}
+
+const initialIdentity = readIdentitySnapshot()
+const isLoggedIn = ref(initialIdentity.loggedIn)
+const currentUserId = ref(initialIdentity.uid)
+const currentUserName = ref(initialIdentity.uname)
+const currentUserRole = ref(initialIdentity.role)
 
 // 一键接入待流转目标（未登录点击接入时暂存目标能力，登录后自动直达接入）
 const pendingAccessCap = ref<PortalCapabilityCard | null | undefined>(undefined)
@@ -1505,6 +1605,9 @@ const userAvatarChar = computed(() => {
 
 // 关键权限判定：仅管理员可见管理后台，普通业务用户完全无感
 const isAdmin = computed(() => {
+  if (localStorage.getItem('rgone_admin_token') || localStorage.getItem('hub_admin_api_key')) {
+    return true
+  }
   if (!isLoggedIn.value) return false
   const uid = currentUserId.value.toLowerCase().trim()
   const role = currentUserRole.value.toLowerCase().trim()
@@ -1512,8 +1615,7 @@ const isAdmin = computed(() => {
     role === 'admin' ||
     uid === 'admin' ||
     uid.startsWith('admin_') ||
-    uid.startsWith('admin-') ||
-    Boolean(localStorage.getItem('hub_admin_api_key'))
+    uid.startsWith('admin-')
   )
 })
 
@@ -1776,6 +1878,18 @@ function persistUserIdentity() {
 
 function openLoginModal() {
   userMenuVisible.value = false
+  if (isEmbedded.value) {
+    // 嵌入 RgOne 模式下：委派给父窗口弹出统一小秘书登录框，严禁显示本地自报工号演示窗
+    try {
+      window.parent.postMessage(
+        { type: 'RGONE_OPEN_LOGIN', mode: 'employee' },
+        window.location.origin
+      )
+    } catch {
+      // ignore
+    }
+    return
+  }
   loginForm.value = {
     userId: currentUserId.value || 'dev-user',
     userName: currentUserName.value === '未登录' ? '张三' : currentUserName.value,
@@ -2272,21 +2386,124 @@ function handleGlobalKeydown(e: KeyboardEvent) {
   }
 }
 
+async function syncRgOneIdentity() {
+  const snap = readIdentitySnapshot()
+  const changed =
+    snap.loggedIn !== isLoggedIn.value ||
+    snap.uid !== currentUserId.value ||
+    snap.uname !== currentUserName.value
+  isLoggedIn.value = snap.loggedIn
+  currentUserId.value = snap.uid
+  currentUserName.value = snap.uname
+  currentUserRole.value = snap.role
+  if (!changed) return
+
+  await loadUserConfigAndGrants()
+  if (snap.loggedIn && pendingAccessCap.value !== undefined) {
+    const target = pendingAccessCap.value
+    pendingAccessCap.value = undefined
+    if (target) {
+      openAccessModal(target)
+    } else {
+      openGlobalAccessModal()
+    }
+  }
+}
+
+function handleParentMessage(event: MessageEvent) {
+  if (event.origin !== window.location.origin) return
+  const data = event.data
+  if (!data || typeof data !== 'object') return
+  if (data.type === 'RGONE_AUTH_CHANGED') {
+    syncRgOneIdentity()
+  } else if (data.type === 'RGONE_THEME_CHANGED' && (data.theme === 'light' || data.theme === 'dark')) {
+    themeStore.setTheme(data.theme)
+  }
+}
+
+function handleStorageSync(event: StorageEvent) {
+  if (!event.key || event.key.startsWith('rgone_') || event.key === 'portal_token') {
+    syncRgOneIdentity()
+  }
+  if (event.key === 'm3-theme' && (event.newValue === 'light' || event.newValue === 'dark')) {
+    themeStore.setTheme(event.newValue)
+  }
+}
+
 onMounted(() => {
+  const params = new URLSearchParams(window.location.search)
+  const themeParam = params.get('theme')
+  if (themeParam === 'light' || themeParam === 'dark') {
+    themeStore.setTheme(themeParam)
+  }
   loadOverview()
   loadCapabilities()
   loadUserConfigAndGrants()
   window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('message', handleParentMessage)
+  window.addEventListener('storage', handleStorageSync)
   document.addEventListener('click', handleDocumentClick)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('message', handleParentMessage)
+  window.removeEventListener('storage', handleStorageSync)
   document.removeEventListener('click', handleDocumentClick)
 })
 </script>
 
 <style scoped>
+.embed-toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 35;
+  background-color: color-mix(in srgb, var(--md-sys-color-surface) 92%, transparent);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.embed-toolbar__inner {
+  max-width: 1360px;
+  margin: 0 auto;
+  padding: 10px 24px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.embed-search {
+  max-width: 380px;
+  flex: 1 1 240px;
+}
+
+.embed-toolbar__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.embed-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 9999px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background-color: var(--md-sys-color-surface-container-low);
+  color: var(--md-sys-color-on-surface);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.embed-pill-btn:hover {
+  background-color: var(--md-sys-color-surface-container);
+}
 .portal-root {
   min-height: 100vh;
   width: 100vw;

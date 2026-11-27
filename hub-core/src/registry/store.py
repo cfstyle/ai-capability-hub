@@ -305,6 +305,16 @@ class RegistryStore:
                 if "validation_status" not in usb_cols:
                     conn.execute("ALTER TABLE user_service_bindings ADD COLUMN validation_status TEXT NOT NULL DEFAULT 'saved';")
                 conn.execute("CREATE INDEX IF NOT EXISTS idx_usb_user_svc ON user_service_bindings(user_id, service_id);")
+
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS user_revocations (
+                        emp_no TEXT PRIMARY KEY,
+                        is_active INTEGER NOT NULL DEFAULT 1,
+                        revoked_before INTEGER NOT NULL DEFAULT 0,
+                        reason TEXT DEFAULT '',
+                        updated_at TEXT NOT NULL
+                    );
+                """)
                 conn.commit()
 
         await asyncio.to_thread(_init_sync)
@@ -856,6 +866,28 @@ class RegistryStore:
 
         return await asyncio.to_thread(_sync_op)
 
+    async def get_invocation_summary(self) -> Dict[str, int]:
+        """汇总全量调用统计（总次数、成功次数、失败/拦截次数）"""
+        def _sync_op() -> Dict[str, int]:
+            with self._get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT
+                        COUNT(*) AS total_calls,
+                        COALESCE(SUM(CASE WHEN LOWER(result_status) = 'success' THEN 1 ELSE 0 END), 0) AS success_calls
+                    FROM invocation_logs
+                """)
+                row = cur.fetchone()
+                total = int(row["total_calls"] or 0)
+                success = int(row["success_calls"] or 0)
+                return {
+                    "calls_total": total,
+                    "calls_success": success,
+                    "calls_failed": max(0, total - success),
+                }
+
+        return await asyncio.to_thread(_sync_op)
+
     async def get_portal_overview(self) -> PortalOverview:
         """获取面向门户的真实运行概览与7天调用趋势"""
         from datetime import timedelta
@@ -893,7 +925,7 @@ class RegistryStore:
                 cur.execute("""
                     SELECT substr(timestamp, 1, 10) as log_day,
                            COUNT(*) as day_total,
-                           SUM(CASE WHEN result_status LIKE '%success%' THEN 1 ELSE 0 END) as day_succ
+                           COALESCE(SUM(CASE WHEN LOWER(result_status) = 'success' THEN 1 ELSE 0 END), 0) as day_succ
                     FROM invocation_logs
                     WHERE substr(timestamp, 1, 10) >= ?
                     GROUP BY log_day
@@ -1081,7 +1113,7 @@ class RegistryStore:
                 cur.execute("""
                     SELECT substr(timestamp, 1, 10) as log_day,
                            COUNT(*) as day_total,
-                           SUM(CASE WHEN result_status LIKE '%success%' THEN 1 ELSE 0 END) as day_succ
+                           COALESCE(SUM(CASE WHEN LOWER(result_status) = 'success' THEN 1 ELSE 0 END), 0) as day_succ
                     FROM invocation_logs
                     WHERE service_id = ? AND substr(timestamp, 1, 10) >= ?
                     GROUP BY log_day
@@ -1695,3 +1727,91 @@ class RegistryStore:
                 return items
 
         return await asyncio.to_thread(_sync_op)
+
+    async def set_user_revocation(
+        self,
+        emp_no: str,
+        is_active: bool,
+        revoked_before: Optional[int] = None,
+        reason: str = "",
+    ) -> Dict[str, Any]:
+        """写入或更新员工 JWT / ide-client Token 吊销与停用水位线"""
+        now = _utc_now_iso()
+
+        def _sync_op() -> Dict[str, Any]:
+            with self._get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT emp_no, is_active, revoked_before FROM user_revocations WHERE emp_no = ?",
+                    (emp_no,),
+                )
+                existing = cur.fetchone()
+                old_cutoff = int(existing["revoked_before"] or 0) if existing else 0
+                if revoked_before is None:
+                    new_cutoff = old_cutoff
+                else:
+                    new_cutoff = max(old_cutoff, int(revoked_before))
+
+                active_int = 1 if is_active else 0
+                if existing:
+                    cur.execute(
+                        """
+                        UPDATE user_revocations
+                        SET is_active = ?, revoked_before = ?, reason = ?, updated_at = ?
+                        WHERE emp_no = ?
+                        """,
+                        (active_int, new_cutoff, reason, now, emp_no),
+                    )
+                else:
+                    cur.execute(
+                        """
+                        INSERT INTO user_revocations (emp_no, is_active, revoked_before, reason, updated_at)
+                        VALUES (?, ?, ?, ?, ?)
+                        """,
+                        (emp_no, active_int, new_cutoff, reason, now),
+                    )
+                conn.commit()
+                return {
+                    "emp_no": emp_no,
+                    "is_active": bool(active_int),
+                    "revoked_before": new_cutoff,
+                    "reason": reason,
+                    "updated_at": now,
+                }
+
+        return await asyncio.to_thread(_sync_op)
+
+    async def get_user_revocation(self, emp_no: str) -> Optional[Dict[str, Any]]:
+        """查询员工本地吊销水位线记录"""
+        def _sync_op() -> Optional[Dict[str, Any]]:
+            with self._get_connection() as conn:
+                cur = conn.cursor()
+                cur.execute(
+                    "SELECT emp_no, is_active, revoked_before, reason, updated_at FROM user_revocations WHERE emp_no = ?",
+                    (emp_no,),
+                )
+                row = cur.fetchone()
+                if not row:
+                    return None
+                return {
+                    "emp_no": row["emp_no"],
+                    "is_active": bool(row["is_active"]),
+                    "revoked_before": int(row["revoked_before"] or 0),
+                    "reason": row["reason"] or "",
+                    "updated_at": row["updated_at"],
+                }
+
+        return await asyncio.to_thread(_sync_op)
+
+    async def is_token_revoked(self, emp_no: str, token_iat: int) -> bool:
+        """检查用户是否被停用或 Token 签发时间早于吊销水位线"""
+        if not emp_no or emp_no.lower() == "guest":
+            return False
+        rec = await self.get_user_revocation(emp_no)
+        if not rec:
+            return False
+        if not rec["is_active"]:
+            return True
+        if rec["revoked_before"] > 0 and int(token_iat or 0) <= rec["revoked_before"]:
+            return True
+        return False

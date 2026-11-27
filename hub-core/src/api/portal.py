@@ -186,10 +186,12 @@ async def get_portal_my_config(
     ctx_user = get_current_user()
     if ctx_user and ctx_user.sub and ctx_user.sub.lower() != "guest":
         effective_user_id = ctx_user.sub
+        effective_user_name = ctx_user.name or effective_user_id
         is_guest = False
         token = create_access_token(user_id=effective_user_id, client_id="ide-client")
     else:
         effective_user_id = "guest"
+        effective_user_name = "guest"
         is_guest = True
         token = ""
 
@@ -198,6 +200,7 @@ async def get_portal_my_config(
     # 规范：客户端配置模板仅在 Authorization 请求头携带令牌，移除 URL 中重复的 ?token=...
     return {
         "user_id": effective_user_id,
+        "user_name": effective_user_name,
         "is_guest": is_guest,
         "token": token,
         "guest_token": "",

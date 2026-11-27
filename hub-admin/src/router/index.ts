@@ -129,7 +129,7 @@ const routes: RouteRecordRaw[] = [
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHistory(import.meta.env.BASE_URL),
   routes,
 })
 
@@ -139,9 +139,10 @@ router.beforeEach((to, _from, next) => {
     next()
     return
   }
-  // 管理后台严格鉴权拦截
+  // 管理后台严格鉴权拦截：支持 RgOne 管理员 JWT 与传统 Hub API Key
+  const rgoneAdminToken = localStorage.getItem('rgone_admin_token')
   const apiKey = localStorage.getItem('hub_admin_api_key')
-  if (!apiKey) {
+  if (!rgoneAdminToken && !apiKey) {
     next({ name: 'Login', query: { redirect: to.fullPath } })
   } else {
     next()

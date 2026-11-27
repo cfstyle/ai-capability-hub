@@ -6,13 +6,11 @@ MVP 阶段使用 JWT（python-jose）进行 token 验签。
 
 from __future__ import annotations
 
-import logging
-from typing import List, Optional
-
 import contextvars
 import logging
+import os
 from datetime import datetime, timedelta, timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 try:
     from jose import JWTError, jwt
@@ -24,6 +22,8 @@ except ImportError:
         jwt = None  # type: ignore
         JWTError = Exception
 from pydantic import BaseModel, Field
+
+from src.config import DEV_MCP_JWT_DEFAULT, load_config
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +40,6 @@ USER_SCOPES: List[str] = [
     "hub:tools:call",
 ]
 
-# MVP 密钥（生产环境应从配置/密钥管理服务加载）
-_JWT_SECRET = "hub-dev-secret-change-me"
 _JWT_ALGORITHM = "HS256"
 
 
@@ -52,6 +50,9 @@ class TokenPayload(BaseModel):
     client_id: str = Field(default="", description="客户端应用 ID")
     scopes: List[str] = Field(default_factory=list, description="授权范围列表")
     exp: int = Field(default=2147483647, description="过期时间戳（Unix epoch）")
+    iat: int = Field(default=0, description="签发时间戳（Unix epoch）")
+    iss: str = Field(default="", description="签发者标识")
+    name: str = Field(default="", description="用户显示姓名")
 
 
 current_user_cv: contextvars.ContextVar[Optional[TokenPayload]] = contextvars.ContextVar(
@@ -69,55 +70,149 @@ def set_current_user(user: Optional[TokenPayload]) -> None:
     current_user_cv.set(user)
 
 
+def _get_auth_settings() -> Dict[str, Any]:
+    """读取当前 JWT 鉴权配置，优先响应环境变量（兼容运行时 monkeypatch 测试）"""
+    cfg = load_config()
+    hub_env = (cfg.hub_env or "development").strip().lower()
+    mcp_secret = os.getenv("HUB_MCP_JWT_SECRET")
+    if mcp_secret is None:
+        mcp_secret = cfg.mcp_jwt_secret
+    rgone_secret = os.getenv("HUB_RGONE_JWT_SECRET")
+    if rgone_secret is None:
+        rgone_secret = cfg.rgone_jwt_secret
+    hub_issuer = (os.getenv("HUB_JWT_ISSUER") or cfg.hub_jwt_issuer or "ai-capability-hub").strip()
+    rgone_issuer = (os.getenv("HUB_RGONE_JWT_ISSUER") or cfg.rgone_jwt_issuer or "rgone").strip()
+    trust_env = os.getenv("HUB_TRUST_RGONE_ADMIN_JWT")
+    if trust_env is not None:
+        trust_rgone_admin = trust_env.strip().lower() in ("1", "true", "yes", "on")
+    else:
+        trust_rgone_admin = cfg.trust_rgone_admin_jwt
+
+    if mcp_secret and rgone_secret and mcp_secret == rgone_secret:
+        raise ValueError("HUB_MCP_JWT_SECRET and HUB_RGONE_JWT_SECRET must not be identical")
+    if hub_env == "production" and (not mcp_secret or mcp_secret == DEV_MCP_JWT_DEFAULT):
+        raise ValueError("HUB_MCP_JWT_SECRET must be set to a non-default secret in production")
+
+    return {
+        "hub_env": hub_env,
+        "mcp_secret": mcp_secret,
+        "rgone_secret": rgone_secret,
+        "hub_issuer": hub_issuer,
+        "rgone_issuer": rgone_issuer,
+        "trust_rgone_admin": trust_rgone_admin,
+    }
+
+
+def _read_unverified_claims(token: str) -> Dict[str, Any]:
+    """安全提取未验签 JWT Claims 用于按 iss 路由密钥"""
+    if hasattr(jwt, "get_unverified_claims"):
+        return jwt.get_unverified_claims(token)
+    return jwt.decode(token, "", options={"verify_signature": False, "verify_exp": False})
+
+
 def create_access_token(
     user_id: str,
     client_id: str = "ide-client",
     scopes: Optional[List[str]] = None,
     expires_delta_days: int = 30,
 ) -> str:
-    """为指定用户和客户端签发带身份的 JWT 访问令牌"""
+    """为指定用户和客户端签发带 iss 标识的 Hub JWT 访问令牌"""
     if scopes is None:
         scopes = USER_SCOPES.copy()
 
+    auth_cfg = _get_auth_settings()
     now = datetime.now(timezone.utc)
+    iat = int(now.timestamp())
     exp = int((now + timedelta(days=expires_delta_days)).timestamp())
     payload = {
         "sub": user_id,
+        "iss": auth_cfg["hub_issuer"],
         "client_id": client_id,
         "scopes": scopes,
         "exp": exp,
-        "iat": int(now.timestamp()),
+        "iat": iat,
     }
-    encoded = jwt.encode(payload, _JWT_SECRET, algorithm=_JWT_ALGORITHM)
+    encoded = jwt.encode(payload, auth_cfg["mcp_secret"], algorithm=_JWT_ALGORITHM)
     if isinstance(encoded, bytes):
         return encoded.decode("utf-8")
     return encoded
 
 
 def verify_token(token: str) -> TokenPayload:
-    """验证 JWT Token 并返回解析后的载荷
+    """按 iss 严格路由并验证 JWT Token，映射统一 TokenPayload。
 
-    Args:
-        token: Bearer token 字符串（不含 'Bearer ' 前缀）
-
-    Returns:
-        TokenPayload 实例
-
-    Raises:
-        ValueError: token 无效或已过期
+    - iss == hub_jwt_issuer ("ai-capability-hub"): 使用 mcp_jwt_secret 验签
+    - iss == rgone_jwt_issuer ("rgone"): 使用 rgone_jwt_secret 验签并按 role 严格映射 scopes
+    - 其他或缺失 iss: 直接拒绝，禁止盲试双密钥
     """
     try:
-        payload = jwt.decode(
-            token,
-            _JWT_SECRET,
-            algorithms=[_JWT_ALGORITHM],
-        )
-        return TokenPayload(
-            sub=payload.get("sub", ""),
-            client_id=payload.get("client_id", ""),
-            scopes=payload.get("scopes", []),
-            exp=payload.get("exp", 0),
-        )
+        unverified = _read_unverified_claims(token)
+        iss = str(unverified.get("iss") or "").strip()
+        if not iss:
+            raise ValueError("Missing token issuer (iss)")
+
+        auth_cfg = _get_auth_settings()
+
+        if iss == auth_cfg["hub_issuer"]:
+            payload = jwt.decode(
+                token,
+                auth_cfg["mcp_secret"],
+                algorithms=[_JWT_ALGORITHM],
+            )
+            sub = str(payload.get("sub") or "").strip()
+            if not sub:
+                raise ValueError("Missing token subject (sub)")
+            return TokenPayload(
+                sub=sub,
+                client_id=str(payload.get("client_id") or ""),
+                scopes=list(payload.get("scopes") or []),
+                exp=int(payload.get("exp") or 0),
+                iat=int(payload.get("iat") or 0),
+                iss=iss,
+                name=str(payload.get("name") or ""),
+            )
+
+        if iss == auth_cfg["rgone_issuer"]:
+            rgone_secret = auth_cfg["rgone_secret"]
+            if not rgone_secret:
+                raise ValueError("RgOne JWT secret is not configured")
+            if auth_cfg["hub_env"] == "production" and rgone_secret in (
+                DEV_MCP_JWT_DEFAULT,
+                "super_secret_jwt_key_for_rgone_portal_2026",
+            ):
+                raise ValueError("RgOne JWT secret must not use default development key in production")
+
+            payload = jwt.decode(
+                token,
+                rgone_secret,
+                algorithms=[_JWT_ALGORITHM],
+            )
+            sub = str(payload.get("sub") or "").strip()
+            if not sub:
+                raise ValueError("Missing token subject (sub)")
+            role = str(payload.get("role") or "").strip().lower()
+            if role == "employee":
+                scopes = USER_SCOPES.copy()
+                client_id = str(payload.get("client_id") or "rgone-portal")
+            elif role == "admin":
+                if not auth_cfg["trust_rgone_admin"]:
+                    raise ValueError("RgOne admin JWT mapping is disabled")
+                scopes = ADMIN_SCOPES.copy()
+                client_id = str(payload.get("client_id") or "rgone-admin")
+            else:
+                raise ValueError(f"Unsupported RgOne role: {role or 'empty'}")
+
+            return TokenPayload(
+                sub=sub,
+                client_id=client_id,
+                scopes=scopes,
+                exp=int(payload.get("exp") or 0),
+                iat=int(payload.get("iat") or 0),
+                iss=iss,
+                name=str(payload.get("name") or ""),
+            )
+
+        raise ValueError(f"Untrusted token issuer: {iss}")
     except Exception as e:
         logger.warning("Token verification failed: %s", e)
         raise ValueError(f"Invalid token: {e}") from e

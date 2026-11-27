@@ -79,13 +79,12 @@
    - `hub-core` 挂载 `./services:/app/services`，确保通过管理端 ZIP 上传动态发布的插件在容器重建后不丢失，且子进程直接继承 `mcp-runner` 的完整依赖与 `PYTHONPATH=/shared-packages`。
 
 3. **离线导出与内网部署**：
-   - 在测试/打包机导出离线镜像包（`mcp-runner:latest` 与 `hub-core` 的共享底层会在 `tar` 中自动去重）：
+   - 在测试/打包机导出离线镜像包（前端门户与治理 UI 已合并至 `RgOne/frontend`，`ai-capability-hub` 作为纯无头引擎不再导出 `hub-admin`）：
      ```bash
      docker save \
        mcp-runner:latest \
        ai-capability-hub-hub-core:latest \
        ai-capability-hub-message-mcp:latest \
-       ai-capability-hub-hub-admin:latest \
        | gzip > ai-capability-hub-images.tar.gz
      ```
    - 拷贝到内网服务器后执行 `docker load -i ai-capability-hub-images.tar.gz` 并 `docker-compose up -d`。后续仅更新 Python 业务 MCP 代码时，只需同步宿主机 `./services/` 目录即可，无需重打或重新导出镜像。

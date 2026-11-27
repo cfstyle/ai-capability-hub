@@ -11,24 +11,64 @@ interface CustomInternalRequestConfig extends InternalAxiosRequestConfig {
   silent?: boolean
 }
 
+const API_BASE = import.meta.env.VITE_API_BASE || '/api/v1'
+
 const instance = axios.create({
-  baseURL: '/api/v1',
+  baseURL: API_BASE,
   timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
   },
 })
 
-// Request Interceptor: Attach API Key or Token
+function isEmbeddedMode(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('embed') === '1' || window.self !== window.top
+  } catch {
+    return false
+  }
+}
+
+function isAdminRequestContext(url?: string): boolean {
+  const path = typeof window !== 'undefined' ? window.location.pathname : ''
+  if (path.includes('/admin')) {
+    return true
+  }
+  const reqUrl = (url || '').trim()
+  return (
+    reqUrl.startsWith('/admin') ||
+    reqUrl.startsWith('/services') ||
+    reqUrl.startsWith('/servers') ||
+    reqUrl.startsWith('/tools') ||
+    reqUrl.startsWith('/audit-logs') ||
+    reqUrl.startsWith('/dashboard') ||
+    reqUrl.startsWith('/system') ||
+    reqUrl.startsWith('/plugins')
+  )
+}
+
+// Request Interceptor: 严格区分管理端与员工门户上下文，防止 Token 串用
 instance.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    const apiKey = localStorage.getItem('hub_admin_api_key')
-    const portalToken = localStorage.getItem('portal_token')
-    if (apiKey) {
-      config.headers['X-API-Key'] = apiKey
-      config.headers['Authorization'] = `Bearer ${apiKey}`
-    } else if (portalToken) {
-      config.headers['Authorization'] = `Bearer ${portalToken}`
+    const adminCtx = isAdminRequestContext(config.url)
+    if (adminCtx) {
+      const rgoneAdminToken = localStorage.getItem('rgone_admin_token')
+      const apiKey = localStorage.getItem('hub_admin_api_key')
+      if (rgoneAdminToken) {
+        config.headers['Authorization'] = `Bearer ${rgoneAdminToken}`
+      } else if (apiKey) {
+        config.headers['X-API-Key'] = apiKey
+        config.headers['Authorization'] = `Bearer ${apiKey}`
+      }
+    } else {
+      const rgoneEmpToken = localStorage.getItem('rgone_emp_token')
+      const portalToken = localStorage.getItem('portal_token')
+      const token = rgoneEmpToken || portalToken
+      if (token) {
+        config.headers['Authorization'] = `Bearer ${token}`
+      }
     }
     return config
   },
@@ -37,7 +77,7 @@ instance.interceptors.request.use(
   }
 )
 
-// Response Interceptor: Error handling (统一收拢到 MdSnackbar / useToast 全局提示，杜绝旧项目顶部粉色消息框)
+// Response Interceptor: Error handling (统一收拢到 MdSnackbar / useToast 全局提示)
 instance.interceptors.response.use(
   (response) => {
     return response.data
@@ -55,16 +95,37 @@ instance.interceptors.response.use(
       detail = '后端服务未启动：无法连接 Hub Core (http://127.0.0.1:8080)'
     }
 
+    if (status === 401) {
+      const adminCtx = isAdminRequestContext(error.config?.url)
+      if (isEmbeddedMode()) {
+        // 嵌入 RgOne iframe 模式下：严禁跳转 Hub 登录页，通知父窗口弹出小秘书登录框
+        if (!adminCtx) {
+          localStorage.removeItem('rgone_emp_token')
+          localStorage.removeItem('portal_token')
+        }
+        try {
+          window.parent.postMessage(
+            {
+              type: 'RGONE_OPEN_LOGIN',
+              mode: adminCtx ? 'admin' : 'employee',
+              reason: 'unauthorized',
+            },
+            window.location.origin
+          )
+        } catch {
+          // ignore cross-origin postMessage error
+        }
+      } else if (window.location.pathname.includes('/admin') && !window.location.pathname.endsWith('/login')) {
+        window.location.href = `${import.meta.env.BASE_URL}login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`
+      }
+    }
+
     if (!isSilent) {
       // 标记错误对象已由全局拦截器弹出提示，防止业务层 catch 二次重复弹窗
       ;(error as any).__toastShown = true
 
       if (status === 401) {
         toast.error(`认证失败: ${detail}`)
-        // 仅在访问管理后台页面时才强制跳转登录，匿名访问公开页面时不扰乱用户
-        if (window.location.pathname.startsWith('/admin') && window.location.pathname !== '/login') {
-          window.location.href = `/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`
-        }
       } else if (status === 403) {
         toast.error(`权限不足: ${detail}`)
       } else if (status === 404) {

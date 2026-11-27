@@ -107,13 +107,12 @@ docker-compose ps
 curl http://localhost:8080/healthz
 ```
 
-如需打包拷贝至隔离内网环境部署：
+如需打包拷贝至隔离内网环境部署（前端已合并至 `RgOne/frontend`，不再需要导出 `hub-admin` 镜像）：
 ```bash
 docker save \
   mcp-runner:latest \
   ai-capability-hub-hub-core:latest \
   ai-capability-hub-message-mcp:latest \
-  ai-capability-hub-hub-admin:latest \
   | gzip > ai-capability-hub-images.tar.gz
 ```
 

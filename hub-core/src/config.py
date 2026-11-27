@@ -11,8 +11,16 @@ from pathlib import Path
 from typing import List, Optional
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from pydantic_settings import BaseSettings
+
+DEV_MCP_JWT_DEFAULT = "hub-dev-secret-change-me"
+FORBIDDEN_PROD_JWT_SECRETS = {
+    "",
+    DEV_MCP_JWT_DEFAULT,
+    "super_secret_jwt_key_for_rgone_portal_2026",
+    "change-me",
+}
 
 
 class UpstreamService(BaseModel):
@@ -32,6 +40,7 @@ class HubConfig(BaseSettings):
 
     hub_name: str = Field(default="AI Capability Hub", description="Hub 实例名称")
     hub_version: str = Field(default="0.2.2", description="Hub 版本号")
+    hub_env: str = Field(default="development", description="运行环境: development / test / production")
     host: str = Field(default="0.0.0.0", description="监听地址")
     port: int = Field(default=8080, description="监听端口")
     database_url: str = Field(
@@ -47,6 +56,30 @@ class HubConfig(BaseSettings):
         default=None,
         description="管理 API 密钥（MVP 用于简单认证）",
     )
+    rgone_jwt_secret: Optional[str] = Field(
+        default=None,
+        description="RgOne Web JWT 共享验签密钥",
+    )
+    rgone_jwt_issuer: str = Field(
+        default="rgone",
+        description="RgOne Web JWT 签发者标识 (iss)",
+    )
+    mcp_jwt_secret: str = Field(
+        default=DEV_MCP_JWT_DEFAULT,
+        description="Hub 自签 ide-client MCP Token 独立密钥",
+    )
+    hub_jwt_issuer: str = Field(
+        default="ai-capability-hub",
+        description="Hub 自签 MCP Token 签发者标识 (iss)",
+    )
+    trust_rgone_admin_jwt: bool = Field(
+        default=True,
+        description="是否信任 RgOne 管理员 JWT 映射为 hub:admin",
+    )
+    internal_service_secret: Optional[str] = Field(
+        default=None,
+        description="与 RgOne 内部接口互通共享密钥 (X-Internal-Secret)",
+    )
     public_mcp_url: Optional[str] = Field(
         default=None,
         description="对外暴露的统一 Gateway 入口 URL（例如 http://hub.example.com/mcp）",
@@ -60,6 +93,23 @@ class HubConfig(BaseSettings):
         ],
         description="启动时自动挂载的上游 MCP 服务列表",
     )
+
+    @model_validator(mode="after")
+    def validate_jwt_configuration(self) -> "HubConfig":
+        env = (os.getenv("HUB_ENV") or self.hub_env or "development").strip().lower()
+        self.hub_env = env
+        rgone_sec = (self.rgone_jwt_secret or "").strip()
+        mcp_sec = (self.mcp_jwt_secret or "").strip()
+
+        if rgone_sec and mcp_sec and rgone_sec == mcp_sec:
+            raise ValueError("HUB_RGONE_JWT_SECRET 与 HUB_MCP_JWT_SECRET 不可相同")
+
+        if env == "production":
+            if mcp_sec in FORBIDDEN_PROD_JWT_SECRETS:
+                raise ValueError("生产环境必须配置独立的非默认 HUB_MCP_JWT_SECRET")
+            if rgone_sec in FORBIDDEN_PROD_JWT_SECRETS:
+                raise ValueError("生产环境必须配置独立的非默认 HUB_RGONE_JWT_SECRET")
+        return self
 
     model_config = {
         "env_prefix": "HUB_",

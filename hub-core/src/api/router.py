@@ -53,10 +53,13 @@ async def verify_admin(
 ) -> str:
     """验证管理员身份 (ADR-009)
 
-    检查 X-API-Key、X-Admin-Key 或 Bearer Token。未配置管理凭据时严格拒绝所有管理操作。
+    优先支持受信任的管理员 JWT（带 hub:admin scope 且未被吊销），同时兼容 X-API-Key / X-Admin-Key。
     """
     from src.config import settings
+    from src.governance.auth import verify_token
+
     config = getattr(request.app.state, "config", None)
+    store = getattr(request.app.state, "store", None)
     expected_keys = {
         getattr(config, "admin_api_key", None),
         getattr(settings, "admin_api_key", None),
@@ -64,39 +67,69 @@ async def verify_admin(
     expected_keys.discard(None)
     expected_keys.discard("")
 
-    # 未配置管理凭据时拒绝一切管理请求
-    if not expected_keys:
-        raise HTTPException(
-            status_code=503,
-            detail="Admin API key is not configured on server. Management requests are disabled.",
-        )
-
     provided_key = x_api_key or x_admin_key
     admin_identity: Optional[str] = None
+    bearer_attempted = False
 
-    if authorization and authorization.startswith("Bearer "):
-        bearer_val = authorization.split("Bearer ", 1)[1].strip()
-        # 尝试通过 JWT 校验是否具备 hub:admin scope
+    if authorization and authorization.lower().startswith("bearer "):
+        bearer_attempted = True
+        bearer_val = authorization.split(" ", 1)[1].strip()
         try:
-            from src.governance.auth import verify_token
             payload = verify_token(bearer_val)
             if "hub:admin" in payload.scopes:
+                if store is not None and await store.is_token_revoked(payload.sub, payload.iat):
+                    raise HTTPException(status_code=401, detail="Admin token has been revoked")
                 admin_identity = payload.sub
+            else:
+                raise HTTPException(status_code=403, detail="Insufficient permissions: hub:admin scope required")
+        except HTTPException:
+            raise
         except Exception:
             pass
         if not provided_key:
             provided_key = bearer_val
 
-    if not provided_key and not admin_identity:
+    if admin_identity:
+        return admin_identity
+
+    # 未走通 JWT 时：若仅携带了无效 Bearer 且系统未启用静态 Key，直接返回 401
+    if not expected_keys:
+        if bearer_attempted:
+            raise HTTPException(status_code=401, detail="Invalid or untrusted admin bearer token")
+        raise HTTPException(
+            status_code=503,
+            detail="Admin API key is not configured on server. Management requests are disabled.",
+        )
+
+    if not provided_key:
         raise HTTPException(status_code=401, detail="Missing admin authentication")
 
-    # 校验 API Key 或已由 JWT 认证
-    if not admin_identity and provided_key not in expected_keys:
+    if provided_key not in expected_keys:
         raise HTTPException(status_code=403, detail="Invalid admin API key")
 
-    # 识别可信操作主体，优先使用 JWT sub，其次请求头 X-Admin-User，兜底 admin
-    effective_admin = admin_identity or request.headers.get("X-Admin-User") or "admin"
-    return effective_admin
+    return request.headers.get("X-Admin-User") or "admin"
+
+
+async def verify_internal_secret(
+    request: Request,
+    x_internal_secret: Optional[str] = Header(None, alias="X-Internal-Secret"),
+) -> None:
+    """校验来自 RgOne 后端的内部服务调用密钥"""
+    import os
+    from hmac import compare_digest
+    from src.config import settings
+
+    config = getattr(request.app.state, "config", None)
+    expected = (
+        os.getenv("HUB_INTERNAL_SERVICE_SECRET")
+        or getattr(config, "internal_service_secret", None)
+        or getattr(settings, "internal_service_secret", None)
+        or ""
+    ).strip()
+    if not expected:
+        raise HTTPException(status_code=503, detail="Internal service secret is not configured")
+    if not x_internal_secret or not compare_digest(x_internal_secret.strip(), expected):
+        raise HTTPException(status_code=403, detail="Invalid internal service secret")
 
 
 def get_store(request: Request) -> RegistryStore:
@@ -860,10 +893,12 @@ async def get_dashboard_summary(
     request: Request,
     _admin: str = Depends(verify_admin),
 ) -> Dict[str, Any]:
-    """获取管理端首页运行总览指标"""
+    """获取管理端首页运行总览指标（与门户概览共享真实调用统计）"""
     store = get_store(request)
     services = await store.list_services()
     tools = await store.list_tools()
+    inv_summary = await store.get_invocation_summary()
+    portal_ov = await store.get_portal_overview()
 
     active = sum(1 for s in services if s.status == ServiceStatus.ACTIVE)
     inactive = sum(1 for s in services if s.status == ServiceStatus.INACTIVE)
@@ -875,10 +910,62 @@ async def get_dashboard_summary(
         "servers_inactive": inactive,
         "servers_degraded": degraded,
         "tools_total": len(tools),
-        "calls_total": None,
-        "calls_success": None,
-        "calls_failed": None,
+        "calls_total": inv_summary["calls_total"],
+        "calls_success": inv_summary["calls_success"],
+        "calls_failed": inv_summary["calls_failed"],
+        "health_rate": portal_ov.health_rate,
+        "daily_trends": [t.model_dump() for t in portal_ov.daily_trends],
     }
+
+
+class UserRevocationRequest(BaseModel):
+    """员工凭证吊销/恢复请求"""
+    reason: str = ""
+    revoked_before: Optional[int] = None
+
+
+@api_router.post(
+    "/internal/users/{emp_no}/revoke",
+    summary="内部接口：停用员工并吊销此前签发的所有 JWT/MCP Token",
+)
+async def internal_revoke_user(
+    emp_no: str,
+    request: Request,
+    body: Optional[UserRevocationRequest] = None,
+    _: None = Depends(verify_internal_secret),
+) -> Dict[str, Any]:
+    """停用员工时调用：立即封禁其 Web JWT 与所有历史 ide-client 长效 MCP Token"""
+    store = get_store(request)
+    now_ts = int(time.time())
+    cutoff = body.revoked_before if (body and body.revoked_before is not None) else now_ts
+    reason = body.reason if body else "employee_disabled"
+    return await store.set_user_revocation(
+        emp_no=emp_no.strip(),
+        is_active=False,
+        revoked_before=cutoff,
+        reason=reason,
+    )
+
+
+@api_router.post(
+    "/internal/users/{emp_no}/restore",
+    summary="内部接口：复职恢复员工访问状态（历史旧 Token 仍维持吊销）",
+)
+async def internal_restore_user(
+    emp_no: str,
+    request: Request,
+    body: Optional[UserRevocationRequest] = None,
+    _: None = Depends(verify_internal_secret),
+) -> Dict[str, Any]:
+    """员工复职时调用：恢复账号可用，但保留原有 revoked_before 水位线以防止停用前旧 Token 复活"""
+    store = get_store(request)
+    reason = body.reason if body else "employee_restored"
+    return await store.set_user_revocation(
+        emp_no=emp_no.strip(),
+        is_active=True,
+        revoked_before=None,
+        reason=reason,
+    )
 
 
 @api_router.get(

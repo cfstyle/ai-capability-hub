@@ -5,6 +5,7 @@
 
 import logging
 from contextlib import asynccontextmanager
+from typing import Optional
 
 from fastapi import FastAPI
 
@@ -28,6 +29,24 @@ class AuthContextMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
+    @staticmethod
+    async def _send_unauthorized(send: Send, detail: str) -> None:
+        import json
+
+        body = json.dumps({"detail": detail}, ensure_ascii=False).encode("utf-8")
+        await send({
+            "type": "http.response.start",
+            "status": 401,
+            "headers": [
+                (b"content-type", b"application/json; charset=utf-8"),
+                (b"content-length", str(len(body)).encode("ascii")),
+            ],
+        })
+        await send({
+            "type": "http.response.body",
+            "body": body,
+        })
+
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] in ("http", "websocket"):
             token = None
@@ -47,12 +66,28 @@ class AuthContextMiddleware:
                     if "token" in params and params["token"]:
                         token = params["token"][0]
 
+            path = scope.get("path", "")
             user_payload = None
+            token_error: Optional[str] = None
             if token:
                 try:
                     user_payload = verify_token(token)
                 except Exception as exc:
                     logger.debug("Token verify note: %s", exc)
+                    token_error = "凭证无效或已过期"
+
+                if user_payload is not None:
+                    fastapi_app = scope.get("app")
+                    store = getattr(getattr(fastapi_app, "state", None), "store", None)
+                    if store is not None and await store.is_token_revoked(user_payload.sub, user_payload.iat):
+                        token_error = "用户账号已停用或凭证已被吊销"
+                        user_payload = None
+
+            # 已被吊销或显式携带无效凭证访问 /mcp 时，绝不降级为 guest 逃逸 L0 限制
+            if token_error and scope["type"] == "http":
+                if token_error == "用户账号已停用或凭证已被吊销" or path.startswith("/mcp"):
+                    await self._send_unauthorized(send, token_error)
+                    return
 
             if not user_payload:
                 user_payload = TokenPayload(
@@ -72,6 +107,7 @@ class AuthContextMiddleware:
 
 
 def build_app() -> FastAPI:
+    load_config.cache_clear()
     config = load_config()
     logging.basicConfig(level=getattr(logging, config.log_level.upper(), logging.INFO))
 

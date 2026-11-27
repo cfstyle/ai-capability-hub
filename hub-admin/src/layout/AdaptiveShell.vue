@@ -128,13 +128,38 @@ const confirmLogout = () => {
   router.push('/login')
 }
 
+const isEmbedded = computed(() => {
+  if (typeof window === 'undefined') return false
+  try {
+    const params = new URLSearchParams(window.location.search)
+    return params.get('embed') === '1' || window.self !== window.top
+  } catch {
+    return false
+  }
+})
+
+function handleParentMessage(event: MessageEvent) {
+  if (event.origin !== window.location.origin) return
+  const data = event.data
+  if (data && data.type === 'RGONE_THEME_CHANGED' && (data.theme === 'light' || data.theme === 'dark')) {
+    themeStore.setTheme(data.theme)
+  }
+}
+
 onMounted(() => {
+  const params = new URLSearchParams(window.location.search)
+  const themeParam = params.get('theme')
+  if (themeParam === 'light' || themeParam === 'dark') {
+    themeStore.setTheme(themeParam)
+  }
   themeStore.setLayoutContext('admin')
   window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('message', handleParentMessage)
 })
 
 onUnmounted(() => {
   window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('message', handleParentMessage)
 })
 </script>
 
@@ -357,6 +382,7 @@ onUnmounted(() => {
         <div class="m3-desktop-top-bar__actions">
           <!-- 返回能力门户 -->
           <button
+            v-if="!isEmbedded"
             type="button"
             class="m3-portal-back-btn md-state-layer"
             title="返回免登录公开能力门户"

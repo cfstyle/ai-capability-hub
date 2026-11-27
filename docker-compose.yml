@@ -33,6 +33,7 @@ services:
         condition: service_healthy
     networks:
       - hub-internal
+      - rgone-net
     restart: unless-stopped
 
   ticm-mcp:
@@ -72,18 +73,6 @@ services:
       - hub-internal
     restart: unless-stopped
 
-  hub-admin:
-    build:
-      context: ./hub-admin
-      dockerfile: Dockerfile
-    ports:
-      - "${ADMIN_PORT:-3000}:80"
-    depends_on:
-      - hub-core
-    networks:
-      - hub-internal
-    restart: unless-stopped
-
 volumes:
   hub-data:
   hub-logs:
@@ -91,3 +80,6 @@ volumes:
 networks:
   hub-internal:
     driver: bridge
+  rgone-net:
+    external: true
+    name: rgone-net

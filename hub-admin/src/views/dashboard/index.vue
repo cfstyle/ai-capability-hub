@@ -81,11 +81,15 @@
           </div>
         </div>
         <div class="metric-value type-display">
-          <span v-if="summary.calls_total !== undefined">{{ summary.calls_total }}</span>
+          <span v-if="summary.calls_total !== undefined && summary.calls_total !== null">{{ summary.calls_total }}</span>
           <span v-else class="text-secondary text-base">自动审计就绪</span>
         </div>
-        <div class="metric-footer type-body-sm text-secondary">
-          完整记录 trace_id、耗时与参数脱敏
+        <div class="metric-footer type-body-sm">
+          <template v-if="summary.calls_total !== undefined && summary.calls_total !== null">
+            <span class="status-chip success">成功: {{ summary.calls_success ?? 0 }}</span>
+            <span class="status-chip warning" v-if="(summary.calls_failed ?? 0) > 0">失败/拦截: {{ summary.calls_failed }}</span>
+          </template>
+          <span v-else class="text-secondary">完整记录 trace_id、耗时与参数脱敏</span>
         </div>
       </MdCard>
     </div>

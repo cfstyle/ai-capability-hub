@@ -688,6 +688,8 @@ async def test_production_encryption_key_required_and_persists_across_rebuild(tm
     # 2. 生产模式配置固定密钥 -> 绑定入库
     monkeypatch.setenv("HUB_CREDENTIAL_ENCRYPTION_KEY", prod_key)
     monkeypatch.setenv("HUB_ADMIN_API_KEY", "prod-admin-key")
+    monkeypatch.setenv("HUB_MCP_JWT_SECRET", "prod-mcp-jwt-secret-9f8e7d6c")
+    monkeypatch.setenv("HUB_RGONE_JWT_SECRET", "prod-rgone-jwt-secret-1a2b3c4d")
     monkeypatch.setenv("HUB_DATABASE_URL", f"sqlite:///{db_file}")
     monkeypatch.setenv("HUB_UPSTREAM_SERVICES", "[]")
     reset_fernet_cache()
